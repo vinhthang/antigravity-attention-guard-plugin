@@ -21,14 +21,6 @@ class TestSubagentDetection:
         result = run_hook({"modelName": "gemini-2.0-flash", "toolCall": {"args": {}}})
         assert result["decision"] == "allow"
 
-    def test_is_subagent_field_allowed(self):
-        result = run_hook({"isSubagent": True, "modelName": "claude-opus-4.6", "toolCall": {"args": {}}})
-        assert result["decision"] == "allow"
-
-    def test_parent_conversation_id_allowed(self):
-        result = run_hook({"parentConversationId": "abc-123", "modelName": "claude-opus-4.6", "toolCall": {"args": {}}})
-        assert result["decision"] == "allow"
-
     def test_primary_agent_blocked(self):
         result = run_hook({"modelName": "claude-opus-4.6", "toolCall": {"args": {"TargetFile": "/some/code.py"}}})
         assert result["decision"] == "deny"

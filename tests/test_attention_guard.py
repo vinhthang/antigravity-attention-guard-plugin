@@ -23,10 +23,6 @@ class TestSubagentSkip:
         result = run_hook({"modelName": "gemini-2.0-flash", "conversationId": "test-1"})
         assert result == {}
 
-    def test_is_subagent_skipped(self):
-        result = run_hook({"isSubagent": True, "modelName": "claude-opus-4.6", "conversationId": "test-2"})
-        assert result == {}
-
 
 class TestTimeoutAlert:
     def test_no_alert_under_timeout(self):

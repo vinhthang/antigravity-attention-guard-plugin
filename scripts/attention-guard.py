@@ -2,16 +2,16 @@
 import sys, json, os, time, argparse, tempfile
 
 
-def is_subagent(payload):
-    """Detect if the current agent is a subagent using structured metadata."""
-    if payload.get("isSubagent", False):
-        return True
-    if payload.get("parentConversationId"):
-        return True
-    model_name = payload.get("modelName", "").lower()
-    if "flash" in model_name:
-        return True
-    return False
+def is_subagent(data):
+    """Detect if the current agent is a subagent via modelName.
+    
+    Note: The Antigravity hook payload only provides modelName for agent
+    identification. Fields like isSubagent or parentConversationId are NOT
+    part of the official hook contract (verified via payload debugging).
+    Subagents MUST always be spawned with Model: 'flash' for detection to work.
+    """
+    model_name = data.get("modelName", "").lower()
+    return "flash" in model_name
 
 
 def main():

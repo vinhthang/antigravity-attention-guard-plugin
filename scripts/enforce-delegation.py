@@ -18,15 +18,15 @@ def is_artifact_path(target_file, artifact_dir):
 
 
 def is_subagent(data):
-    """Detect if the current agent is a subagent using structured metadata."""
-    if data.get("isSubagent", False):
-        return True
-    if data.get("parentConversationId"):
-        return True
+    """Detect if the current agent is a subagent via modelName.
+    
+    Note: The Antigravity hook payload only provides modelName for agent
+    identification. Fields like isSubagent or parentConversationId are NOT
+    part of the official hook contract (verified via payload debugging).
+    Subagents MUST always be spawned with Model: 'flash' for detection to work.
+    """
     model_name = data.get("modelName", "").lower()
-    if "flash" in model_name:
-        return True
-    return False
+    return "flash" in model_name
 
 
 def main():
