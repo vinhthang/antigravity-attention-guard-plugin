@@ -106,3 +106,24 @@ class TestEdgeCases:
             capture_output=True, text=True, timeout=5
         )
         assert json.loads(result.stdout)["decision"] == "allow"
+
+
+import sys
+import unittest.mock
+
+class TestRTKNotInstalled:
+    def test_skips_when_rtk_not_installed(self):
+        """Verify the hook gracefully skips when rtk binary is not found."""
+        # Run the script with PATH set to empty so rtk won't be found
+        result = subprocess.run(
+            [sys.executable, SCRIPT],
+            input=json.dumps({
+                "toolCall": {"name": "run_command", "args": {"CommandLine": "kubectl get pods"}}
+            }),
+            capture_output=True, text=True, timeout=5,
+            env={**os.environ, "PATH": ""}
+        )
+        output = json.loads(result.stdout)
+        assert output["decision"] == "allow"
+        assert "overwrite" not in output
+

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import json
+import shutil
 
 # Commands that are too simple or don't benefit from RTK compression
 SKIP_PREFIXES = [
@@ -47,6 +48,11 @@ def should_skip(cmd):
 
 def main():
     try:
+        # Skip RTK enforcement if rtk is not installed
+        if not shutil.which("rtk"):
+            print(json.dumps({"decision": "allow"}))
+            return
+
         raw_payload = sys.stdin.read()
         if not raw_payload or not raw_payload.strip():
             print(json.dumps({"decision": "allow"}))
