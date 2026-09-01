@@ -1,5 +1,3 @@
 {
-  "name": "Attention Dilution Guard",
-  "version": "1.0.0",
-  "description": "A deterministic lifecycle plugin for Antigravity that cures Attention Dilution in long-running agent sessions."
+  "name": "attention-guard"
 }
