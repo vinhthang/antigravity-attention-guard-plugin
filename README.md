@@ -1,18 +1,21 @@
 # Antigravity Attention Guard Plugin
 
-A deterministic lifecycle plugin for Google Antigravity that physically cures the "Attention Dilution" and "Lost in the Middle" phenomena in long-running agent sessions.
+Prevents Attention Dilution in long-running AI agent sessions by enforcing strict delegation, time-based guards, and output verification.
 
 ## Installation
-1. Clone this repository into your global or local plugins directory:
-   ```bash
-   git clone https://github.com/vinhthang/antigravity-attention-guard-plugin.git ~/.gemini/plugins/attention-guard
-   ```
-2. Ensure you give execution permissions to the Python scripts inside the `scripts` folder: `chmod +x scripts/*.py`.
-3. Enable the plugin in your Antigravity settings or CLI.
+
+```bash
+git clone https://github.com/vinhthang/antigravity-attention-guard-plugin.git ~/.gemini/config/plugins/attention-guard
+```
 
 ## Updating
-Since the plugin is a standard Git repository, you can update to the latest version by pulling the latest changes. The Antigravity engine will instantly apply the updates without requiring a restart.
+
 ```bash
-cd ~/.gemini/plugins/attention-guard
-git pull
+cd ~/.gemini/config/plugins/attention-guard && git pull
 ```
+
+## Features
+
+- **PreToolUse Hook**: Blocks the Primary Agent from directly executing code or modifying files. Forces delegation to Flash subagents.
+- **PreInvocation Hook**: Monitors session duration and injects planning reminders after a configurable timeout (default: 120s).
+- **Stop Hook**: Verifies agent output quality. If the agent forgets to summarize its work, it is forced to re-read all project and global instructions to reset its context window.
