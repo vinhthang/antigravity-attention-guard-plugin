@@ -94,3 +94,27 @@ class TestSkillsSummaryDetection:
 
         os.remove(tracker)
         os.remove(transcript)
+
+    def test_summary_case_insensitive(self):
+        conv_id = f"chk-case-{time.time()}"
+        tracker = os.path.join(tempfile.gettempdir(), f"agy_start_{conv_id}")
+        with open(tracker, "w") as f:
+            f.write(str(time.time() - 300))
+
+        transcript = os.path.join(tempfile.gettempdir(), f"transcript_{conv_id}.jsonl")
+        create_transcript(transcript, [
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "Done. summary of Skills Used: rtk, superpowers."}
+        ])
+
+        result = run_hook({
+            "fullyIdle": True,
+            "modelName": "claude-opus-4.6",
+            "conversationId": conv_id,
+            "transcriptPath": transcript,
+            "workspacePaths": []
+        }, timeout_arg=120)
+        assert result == {}
+
+        os.remove(tracker)
+        os.remove(transcript)
+

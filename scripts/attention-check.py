@@ -173,7 +173,7 @@ def main():
         print(json.dumps({}))
         return
 
-    if "Summary of skills used:" not in last_model_content:
+    if "summary of skills used:" not in last_model_content.lower():
         # Prevent infinite rejection loop
         rejection_count = get_rejection_count(tracker)
         if rejection_count >= MAX_STOP_REJECTIONS:

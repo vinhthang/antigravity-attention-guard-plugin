@@ -2,6 +2,67 @@
 import sys
 import json
 import os
+import tempfile
+import time
+
+# Verb prefixes that indicate a mutating/write MCP tool
+WRITE_VERB_PREFIXES = (
+    "write", "edit", "create", "update", "delete", "remove",
+    "push", "move", "fork", "insert", "modify", "set", "put",
+    "patch", "deploy", "add", "transition", "fill",
+)
+
+MCP_SCHEMA_DIR = os.path.expanduser("~/.gemini/antigravity/mcp")
+MCP_CACHE_TTL = 300  # seconds
+
+
+def discover_mcp_write_tools():
+    """Scan MCP schema directories to discover write/mutating tools.
+    
+    Caches the result in a temp file for 5 minutes to avoid
+    repeated filesystem scans on every hook invocation.
+    """
+    cache_file = os.path.join(tempfile.gettempdir(), "agy_mcp_write_tools.json")
+    
+    # Check cache
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r") as f:
+                cached = json.load(f)
+            if time.time() - cached.get("timestamp", 0) < MCP_CACHE_TTL:
+                return set(cached.get("tools", []))
+        except Exception:
+            pass
+    
+    # Scan MCP schema directories
+    write_tools = set()
+    if os.path.exists(MCP_SCHEMA_DIR):
+        try:
+            for server_name in os.listdir(MCP_SCHEMA_DIR):
+                server_dir = os.path.join(MCP_SCHEMA_DIR, server_name)
+                if not os.path.isdir(server_dir):
+                    continue
+                for filename in os.listdir(server_dir):
+                    if not filename.endswith(".json"):
+                        continue
+                    tool_name = filename[:-5]  # Remove .json
+                    # Check if tool name starts with a write verb prefix
+                    tool_lower = tool_name.lower()
+                    for prefix in WRITE_VERB_PREFIXES:
+                        if tool_lower.startswith(prefix):
+                            write_tools.add(tool_lower)
+                            break
+        except Exception:
+            pass
+    
+    # Write cache
+    try:
+        with open(cache_file, "w") as f:
+            json.dump({"timestamp": time.time(), "tools": list(write_tools)}, f)
+    except Exception:
+        pass
+    
+    return write_tools
 
 
 def is_artifact_path(target_file, artifact_dir):
@@ -53,17 +114,12 @@ def main():
             print(json.dumps({"decision": "allow"}))
             return
 
-        # Check if this is an MCP tool call - parse the MCP tool name
+        # Check if this is an MCP tool call
         tool_name = tool_call.get("name", "")
         if tool_name == "call_mcp_tool":
             mcp_tool = args.get("ToolName", "").lower()
-            # Allow read-only MCP tools, block write operations
-            mcp_write_tools = [
-                "write_file", "edit_file", "create_directory", "move_file",
-                "create_or_update_file", "push_files", "create_issue",
-                "create_merge_request", "create_branch", "create_repository",
-                "fork_repository"
-            ]
+            # Discover MCP write tools dynamically from schema directories
+            mcp_write_tools = discover_mcp_write_tools()
             if mcp_tool not in mcp_write_tools:
                 print(json.dumps({"decision": "allow"}))
                 return

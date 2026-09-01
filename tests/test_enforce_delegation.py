@@ -121,3 +121,19 @@ class TestMCPToolCoverage:
             "toolCall": {"name": "call_mcp_tool", "args": {"ToolName": "write_file"}}
         })
         assert result["decision"] == "allow"
+
+    def test_mcp_atlassian_write_blocked_for_primary(self):
+        """Verify dynamically discovered Atlassian write tools are blocked."""
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "call_mcp_tool", "args": {"ToolName": "createJiraIssue"}}
+        })
+        assert result["decision"] == "deny"
+
+    def test_mcp_atlassian_read_allowed_for_primary(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "call_mcp_tool", "args": {"ToolName": "getJiraIssue"}}
+        })
+        assert result["decision"] == "allow"
+
