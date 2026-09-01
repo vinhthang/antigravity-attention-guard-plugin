@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+import subprocess
+import json
+import os
+import time
+import tempfile
+import pytest
+
+SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "attention-check.py")
+
+
+def run_hook(payload, timeout_arg=120):
+    result = subprocess.run(
+        ["python3", SCRIPT, "--timeout", str(timeout_arg)],
+        input=json.dumps(payload),
+        capture_output=True, text=True, timeout=10
+    )
+    return json.loads(result.stdout)
+
+
+def create_transcript(path, entries):
+    with open(path, "w") as f:
+        for entry in entries:
+            f.write(json.dumps(entry) + "\n")
+
+
+class TestSubagentSkip:
+    def test_subagent_skipped(self):
+        result = run_hook({"fullyIdle": True, "modelName": "gemini-2.0-flash", "conversationId": "chk-1"})
+        assert result == {}
+
+    def test_not_fully_idle_skipped(self):
+        result = run_hook({"fullyIdle": False, "modelName": "claude-opus-4.6", "conversationId": "chk-2"})
+        assert result == {}
+
+
+class TestStopRejectionLimit:
+    def test_max_rejections_then_allow(self):
+        conv_id = f"chk-limit-{time.time()}"
+        tracker = os.path.join(tempfile.gettempdir(), f"agy_start_{conv_id}")
+        with open(tracker, "w") as f:
+            f.write(str(time.time() - 300))
+
+        transcript = os.path.join(tempfile.gettempdir(), f"transcript_{conv_id}.jsonl")
+        create_transcript(transcript, [
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "I did some work but no summary."}
+        ])
+
+        payload = {
+            "fullyIdle": True,
+            "modelName": "claude-opus-4.6",
+            "conversationId": conv_id,
+            "transcriptPath": transcript,
+            "workspacePaths": []
+        }
+
+        # First 3 rejections should return "continue"
+        for i in range(3):
+            result = run_hook(payload, timeout_arg=120)
+            assert result.get("decision") == "continue", f"Rejection {i+1} should block"
+
+        # 4th attempt should allow (max rejections reached)
+        result = run_hook(payload, timeout_arg=120)
+        assert result == {}, "Should allow after max rejections"
+
+        # Cleanup
+        os.remove(tracker)
+        os.remove(transcript)
+        count_file = tracker + "_stop_count"
+        if os.path.exists(count_file):
+            os.remove(count_file)
+
+
+class TestSkillsSummaryDetection:
+    def test_summary_present_passes(self):
+        conv_id = f"chk-pass-{time.time()}"
+        tracker = os.path.join(tempfile.gettempdir(), f"agy_start_{conv_id}")
+        with open(tracker, "w") as f:
+            f.write(str(time.time() - 300))
+
+        transcript = os.path.join(tempfile.gettempdir(), f"transcript_{conv_id}.jsonl")
+        create_transcript(transcript, [
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "Done. Summary of skills used: rtk, superpowers."}
+        ])
+
+        result = run_hook({
+            "fullyIdle": True,
+            "modelName": "claude-opus-4.6",
+            "conversationId": conv_id,
+            "transcriptPath": transcript,
+            "workspacePaths": []
+        }, timeout_arg=120)
+        assert result == {}
+
+        os.remove(tracker)
+        os.remove(transcript)
