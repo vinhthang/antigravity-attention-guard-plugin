@@ -9,3 +9,10 @@ A deterministic lifecycle plugin for Google Antigravity that physically cures th
    ```
 2. Ensure you give execution permissions to the Python scripts inside the `scripts` folder: `chmod +x scripts/*.py`.
 3. Enable the plugin in your Antigravity settings or CLI.
+
+## Updating
+Since the plugin is a standard Git repository, you can update to the latest version by pulling the latest changes. The Antigravity engine will instantly apply the updates without requiring a restart.
+```bash
+cd ~/.gemini/plugins/attention-guard
+git pull
+```
