@@ -53,6 +53,21 @@ def main():
             print(json.dumps({"decision": "allow"}))
             return
 
+        # Check if this is an MCP tool call - parse the MCP tool name
+        tool_name = tool_call.get("name", "")
+        if tool_name == "call_mcp_tool":
+            mcp_tool = args.get("ToolName", "").lower()
+            # Allow read-only MCP tools, block write operations
+            mcp_write_tools = [
+                "write_file", "edit_file", "create_directory", "move_file",
+                "create_or_update_file", "push_files", "create_issue",
+                "create_merge_request", "create_branch", "create_repository",
+                "fork_repository"
+            ]
+            if mcp_tool not in mcp_write_tools:
+                print(json.dumps({"decision": "allow"}))
+                return
+
         # Block Primary Agent from direct code execution and file modifications
         print(json.dumps({
             "decision": "deny",

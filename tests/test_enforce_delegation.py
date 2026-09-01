@@ -91,3 +91,33 @@ class TestEdgeCases:
         )
         output = json.loads(result.stdout)
         assert output["decision"] == "allow"
+
+
+class TestMCPToolCoverage:
+    def test_mcp_read_tool_allowed_for_subagent(self):
+        result = run_hook({
+            "modelName": "gemini-3.7-flash-tiered",
+            "toolCall": {"name": "call_mcp_tool", "args": {"ToolName": "read_file"}}
+        })
+        assert result["decision"] == "allow"
+
+    def test_mcp_read_tool_allowed_for_primary(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "call_mcp_tool", "args": {"ToolName": "read_file"}}
+        })
+        assert result["decision"] == "allow"
+
+    def test_mcp_write_tool_blocked_for_primary(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "call_mcp_tool", "args": {"ToolName": "write_file"}}
+        })
+        assert result["decision"] == "deny"
+
+    def test_mcp_write_tool_allowed_for_subagent(self):
+        result = run_hook({
+            "modelName": "gemini-3.7-flash-tiered",
+            "toolCall": {"name": "call_mcp_tool", "args": {"ToolName": "write_file"}}
+        })
+        assert result["decision"] == "allow"
