@@ -17,15 +17,6 @@ def main():
     model_name = payload.get("modelName", "").lower()
     is_subagent = "flash" in model_name
     
-    has_delegated = False
-    transcript_path = payload.get("transcriptPath", "")
-    if transcript_path and os.path.exists(transcript_path):
-        with open(transcript_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if '"invoke_subagent"' in line:
-                    has_delegated = True
-                    break
-                    
     tracker = f"/tmp/agy_start_{conv_id}"
     if not os.path.exists(tracker):
         with open(tracker, "w") as f:
@@ -41,7 +32,7 @@ def main():
     plan_path = os.path.join(artifact_dir, "implementation_plan.md") if artifact_dir else ""
     messages = []
     
-    if not is_subagent and not has_delegated and elapsed > args.timeout:
+    if not is_subagent and elapsed > args.timeout:
         if plan_path and not os.path.exists(plan_path):
             messages.append(f"ATTENTION: Execution time >{args.timeout}s. You MUST halt and create an implementation_plan.md artifact before proceeding.")
         messages.append("REMINDER: At the end of your turn, explicitly report the summary of skills used. If you are a subagent, you MUST use the send_message tool to report your final results back to the parent agent before terminating.")

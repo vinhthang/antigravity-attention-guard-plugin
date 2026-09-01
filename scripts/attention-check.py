@@ -53,11 +53,6 @@ def main():
         print(json.dumps({})); return
 
     is_subagent = "flash" in payload.get("modelName", "").lower()
-    has_delegated = False
-    with open(transcript_path, "r", encoding="utf-8") as f:
-        for line in f:
-            if '"invoke_subagent"' in line:
-                has_delegated = True; break
 
     conv_id = payload.get("conversationId", "unknown")
     tracker = f"/tmp/agy_start_{conv_id}"
@@ -67,7 +62,7 @@ def main():
             with open(tracker, "r") as f: elapsed = time.time() - float(f.read().strip())
         except: pass
 
-    if is_subagent or has_delegated or elapsed <= args.timeout:
+    if is_subagent or elapsed <= args.timeout:
         print(json.dumps({})); return
 
     if "Summary of skills used:" not in last_model_content:
