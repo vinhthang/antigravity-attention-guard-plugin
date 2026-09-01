@@ -8,6 +8,11 @@
             "type": "command",
             "command": "/usr/bin/env python3 ./scripts/enforce-delegation.py",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "/usr/bin/env python3 ./scripts/rtk-enforcer.py",
+            "timeout": 5
           }
         ]
       }
@@ -16,13 +21,6 @@
       {
         "type": "command",
         "command": "/usr/bin/env python3 ./scripts/attention-guard.py --timeout 120",
-        "timeout": 5
-      }
-    ],
-    "PostInvocation": [
-      {
-        "type": "command",
-        "command": "/usr/bin/env python3 ./scripts/output-guard.py",
         "timeout": 5
       }
     ],
