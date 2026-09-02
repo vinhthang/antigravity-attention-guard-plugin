@@ -14,4 +14,5 @@
    - The Primary Agent will then spawn a `pro` subagent to investigate and debug the failure.
 
 4. **Subagent Communication:**
-   - When a subagent finishes a task, it MUST use the `send_message` tool to report its findings or completion status back to the parent agent before terminating.
+   - Subagent responses via `send_message` MUST be valid JSON. No conversational fluff.
+   - Required fields: `{"status": "completed|failed", "summary": "..."}`. Add `files_modified`, `test_results`, or `error` as needed.
