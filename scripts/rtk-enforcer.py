@@ -3,45 +3,37 @@ import sys
 import json
 import shutil
 
-# Commands that are too simple or don't benefit from RTK compression
-SKIP_PREFIXES = [
-    "rtk",        # already using rtk
-    "echo",       # simple output
-    "mkdir",      # file operations
-    "cp ", "cp\t",
-    "mv ", "mv\t",
-    "rm ", "rm\t",
-    "chmod",
-    "touch",
-    "cat ", "cat\t",
-    "export",
-    "source",
-    "cd ", "cd\t",
-    "which",
-    "true",
-    "false",
-    "sleep",
-    "kill",
-    "pip",
-    "pip3",
-    "npm install",
-    "pnpm install",
-    "brew install",
-    "python3 -c",
-    "python -c",
+# Commands that benefit from RTK output compression
+RTK_COMPATIBLE = [
+    "kubectl", "git", "docker", "docker-compose", "podman",
+    "mvn", "gradle", "./gradlew", "go ", "cargo", "rustc",
+    "npm", "npx", "pnpm", "yarn",
+    "pip ", "pip3", "uv ", "ruff", "pytest",
+    "aws", "oci", "gcloud", "az ",
+    "terraform", "tofu",
+    "helm", "istioctl",
+    "curl", "wget",
+    "brew",
+    "lsof", "ps ", "top", "htop",
+    "find ", "rg ", "grep", "ag ",
+    "tree", "ls ", "ls\t",
+    "glab", "gh ",
+    "make", "cmake",
 ]
 
 
-def should_skip(cmd):
-    """Check if the command should skip RTK enforcement."""
+def should_prepend_rtk(cmd):
+    """Check if the command should have RTK prepended."""
     cmd_stripped = cmd.strip()
-    # Skip if command already pipes to rtk
-    if "| rtk" in cmd_stripped:
-        return True
-    # Skip if command starts with a known simple prefix
+    if not cmd_stripped:
+        return False
+    # Skip if command already starts with rtk or pipes to rtk
+    if cmd_stripped.lower().startswith("rtk") or "| rtk" in cmd_stripped.lower():
+        return False
+    # Check if command starts with an allowlisted prefix
     cmd_lower = cmd_stripped.lower()
-    for prefix in SKIP_PREFIXES:
-        if cmd_lower.startswith(prefix):
+    for prefix in RTK_COMPATIBLE:
+        if cmd_lower.startswith(prefix.lower()):
             return True
     return False
 
@@ -73,8 +65,8 @@ def main():
             print(json.dumps({"decision": "allow"}))
             return
 
-        # Skip commands that don't benefit from RTK
-        if should_skip(command_line):
+        # Check if the command should have RTK prepended
+        if not should_prepend_rtk(command_line):
             print(json.dumps({"decision": "allow"}))
             return
 

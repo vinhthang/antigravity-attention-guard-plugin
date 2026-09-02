@@ -17,13 +17,6 @@
         ]
       }
     ],
-    "PreInvocation": [
-      {
-        "type": "command",
-        "command": "/usr/bin/env python3 ./scripts/attention-guard.py --timeout 120",
-        "timeout": 5
-      }
-    ],
     "Stop": [
       {
         "type": "command",

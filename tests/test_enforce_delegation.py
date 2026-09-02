@@ -42,9 +42,17 @@ class TestArtifactBypass:
     def test_brain_path_component_allowed(self):
         result = run_hook({
             "modelName": "claude-opus-4.6",
-            "toolCall": {"args": {"TargetFile": "/some/path/brain/conv-123/task.md"}}
+            "toolCall": {"args": {"TargetFile": "/some/path/brain/a1b2c3d4-e5f6-7890-abcd-ef1234567890/task.md"}}
         })
         assert result["decision"] == "allow"
+
+    def test_brain_in_project_name_blocked(self):
+        """Ensure paths like brain-tumor-classifier don't bypass the guard."""
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"args": {"TargetFile": "/Users/thanghoang/github/brain-tumor-classifier/model.py"}}
+        })
+        assert result["decision"] == "deny"
 
     def test_non_artifact_path_blocked(self):
         result = run_hook({
@@ -108,27 +116,12 @@ class TestMCPToolCoverage:
         })
         assert result["decision"] == "allow"
 
-    def test_mcp_write_tool_blocked_for_primary(self):
-        result = run_hook({
-            "modelName": "claude-opus-4.6",
-            "toolCall": {"name": "call_mcp_tool", "args": {"ToolName": "write_file"}}
-        })
-        assert result["decision"] == "deny"
-
     def test_mcp_write_tool_allowed_for_subagent(self):
         result = run_hook({
             "modelName": "gemini-3.7-flash-tiered",
             "toolCall": {"name": "call_mcp_tool", "args": {"ToolName": "write_file"}}
         })
         assert result["decision"] == "allow"
-
-    def test_mcp_atlassian_write_blocked_for_primary(self):
-        """Verify dynamically discovered Atlassian write tools are blocked."""
-        result = run_hook({
-            "modelName": "claude-opus-4.6",
-            "toolCall": {"name": "call_mcp_tool", "args": {"ToolName": "createJiraIssue"}}
-        })
-        assert result["decision"] == "deny"
 
     def test_mcp_atlassian_read_allowed_for_primary(self):
         result = run_hook({

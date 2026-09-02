@@ -10,7 +10,6 @@
 |---|---|---|
 | PreToolUse | `enforce-delegation.py` | Blocks Primary Agent from code modification, shell execution, and MCP write tools. Forces delegation to Flash subagents. |
 | PreToolUse | `rtk-enforcer.py` | Auto-prepends `rtk` to subagent commands for 60-95% output token compression. Gracefully skips if RTK is not installed. |
-| PreInvocation | `attention-guard.py` | Monitors session duration and injects planning reminders after configurable timeout (default: 120s). |
 | Stop | `attention-check.py` | Verifies agent output quality. Forces re-reading of all project and global rules if the agent forgets to summarize its work. Max 3 retries to prevent infinite loops. |
 
 ## Installation

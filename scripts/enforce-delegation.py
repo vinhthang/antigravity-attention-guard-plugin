@@ -2,6 +2,8 @@
 import sys
 import json
 import os
+import re
+import hashlib
 import tempfile
 import time
 
@@ -74,20 +76,45 @@ def is_artifact_path(target_file, artifact_dir):
         norm_artifact = os.path.normpath(os.path.abspath(artifact_dir))
         if norm_target.startswith(norm_artifact):
             return True
-    # Fallback: check if 'brain' is a path component
-    return "brain" in norm_target.split(os.sep)
+    # Fallback: require brain/<uuid>/ pattern (Antigravity conversation IDs are UUIDs)
+    return bool(re.search(r'/brain/[0-9a-f-]{36}/', norm_target))
 
 
 def is_subagent(data):
-    """Detect if the current agent is a subagent via modelName.
+    """Detect if the current agent is a subagent.
     
-    Note: The Antigravity hook payload only provides modelName for agent
-    identification. Fields like isSubagent or parentConversationId are NOT
-    part of the official hook contract (verified via payload debugging).
-    Subagents MUST always be spawned with Model: 'flash' for detection to work.
+    Primary signal: 'flash' in modelName.
+    Secondary signal: conversation ID differs from the tracked primary.
     """
     model_name = data.get("modelName", "").lower()
-    return "flash" in model_name
+    if "flash" in model_name:
+        return True
+    # Secondary: conversation ID tracking (per-workspace)
+    conv_id = data.get("conversationId", "")
+    workspace_paths = data.get("workspacePaths", [])
+    if conv_id and workspace_paths:
+        workspace_key = hashlib.md5("|".join(sorted(workspace_paths)).encode()).hexdigest()[:8]
+        tracker = os.path.join(tempfile.gettempdir(), f"agy_primary_{workspace_key}")
+        if os.path.exists(tracker):
+            try:
+                with open(tracker, "r") as f:
+                    stored = json.loads(f.read().strip())
+                primary_id = stored.get("conversationId", "")
+                stored_time = stored.get("timestamp", 0)
+                # If tracker is older than 24 hours, treat as stale and overwrite
+                if time.time() - stored_time > 86400:
+                    with open(tracker, "w") as f:
+                        json.dump({"conversationId": conv_id, "timestamp": time.time()}, f)
+                    return False
+                if primary_id and primary_id != conv_id:
+                    return True  # Different conversation = subagent
+            except Exception:
+                pass
+        else:
+            # First invocation in this workspace — record as primary
+            with open(tracker, "w") as f:
+                json.dump({"conversationId": conv_id, "timestamp": time.time()}, f)
+    return False
 
 
 def main():

@@ -185,16 +185,24 @@ def main():
 
         workspace_paths = payload.get("workspacePaths", [])
         rules_to_read = find_rules(workspace_paths)
-        rules_list = "\n".join([f"{i+1}. {r}" for i, r in enumerate(rules_to_read)])
 
-        reason = (
+        # Read all rule file contents directly
+        rule_contents = []
+        for rule_path in rules_to_read:
+            try:
+                with open(rule_path, "r") as rf:
+                    content = rf.read()
+                rule_contents.append(f"=== {os.path.basename(rule_path)} ===\n{content}")
+            except Exception:
+                rule_contents.append(f"=== {os.path.basename(rule_path)} === (could not read)")
+
+        injected_text = (
             "ATTENTION DILUTION DETECTED! You forgot to report the 'Summary of skills used:'. "
-            "You MUST stop, and before writing code again, you must reset your context by using "
-            "the view_file tool to read the following active rules:\n"
-            f"{rules_list}\n"
-            "Correct your mistake."
+            "Your context has been refreshed with all active rules below. "
+            "Re-read them carefully and correct your response.\n\n"
+            + "\n\n".join(rule_contents)
         )
-        print(json.dumps({"decision": "continue", "reason": reason}))
+        print(json.dumps({"decision": "continue", "injectSteps": [{"ephemeralMessage": injected_text}]}))
     else:
         reset_rejection_count(tracker)
         print(json.dumps({}))
