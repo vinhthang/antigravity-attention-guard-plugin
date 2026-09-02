@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
-import sys, json, os, time, argparse, tempfile
+import sys, json, os, time, argparse
 
 MAX_STOP_REJECTIONS = 3
+
+
+def get_cache_dir():
+    cache_dir = os.environ.get("AGY_CACHE_DIR") or os.path.expanduser("~/.gemini/antigravity/cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
 
 
 def is_subagent(data):
@@ -151,7 +157,7 @@ def main():
 
     # Check elapsed time
     conv_id = payload.get("conversationId", "unknown")
-    tracker = os.path.join(tempfile.gettempdir(), f"agy_start_{conv_id}")
+    tracker = os.path.join(get_cache_dir(), f"agy_start_{conv_id}")
     elapsed = 0
     if os.path.exists(tracker):
         try:

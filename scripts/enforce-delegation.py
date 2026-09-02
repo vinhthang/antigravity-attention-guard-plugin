@@ -4,7 +4,6 @@ import json
 import os
 import re
 import hashlib
-import tempfile
 import time
 
 # Verb prefixes that indicate a mutating/write MCP tool
@@ -18,13 +17,19 @@ MCP_SCHEMA_DIR = os.path.expanduser("~/.gemini/antigravity/mcp")
 MCP_CACHE_TTL = 300  # seconds
 
 
+def get_cache_dir():
+    cache_dir = os.environ.get("AGY_CACHE_DIR") or os.path.expanduser("~/.gemini/antigravity/cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+
 def discover_mcp_write_tools():
     """Scan MCP schema directories to discover write/mutating tools.
     
     Caches the result in a temp file for 5 minutes to avoid
     repeated filesystem scans on every hook invocation.
     """
-    cache_file = os.path.join(tempfile.gettempdir(), "agy_mcp_write_tools.json")
+    cache_file = os.path.join(get_cache_dir(), "agy_mcp_write_tools.json")
     
     # Check cache
     if os.path.exists(cache_file):
@@ -94,7 +99,7 @@ def is_subagent(data):
     workspace_paths = data.get("workspacePaths", [])
     if conv_id and workspace_paths:
         workspace_key = hashlib.md5("|".join(sorted(workspace_paths)).encode()).hexdigest()[:8]
-        tracker = os.path.join(tempfile.gettempdir(), f"agy_primary_{workspace_key}")
+        tracker = os.path.join(get_cache_dir(), f"agy_primary_{workspace_key}")
         if os.path.exists(tracker):
             try:
                 with open(tracker, "r") as f:

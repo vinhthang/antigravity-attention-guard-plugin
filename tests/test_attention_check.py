@@ -9,11 +9,24 @@ import pytest
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "attention-check.py")
 
 
+@pytest.fixture(autouse=True)
+def setup_test_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGY_CACHE_DIR", str(tmp_path))
+
+
+def get_cache_dir():
+    cache_dir = os.environ.get("AGY_CACHE_DIR") or os.path.expanduser("~/.gemini/antigravity/cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+
 def run_hook(payload, timeout_arg=120):
+    env = os.environ.copy()
     result = subprocess.run(
         ["python3", SCRIPT, "--timeout", str(timeout_arg)],
         input=json.dumps(payload),
-        capture_output=True, text=True, timeout=10
+        capture_output=True, text=True, timeout=10,
+        env=env
     )
     return json.loads(result.stdout)
 
@@ -37,7 +50,7 @@ class TestSubagentSkip:
 class TestStopRejectionLimit:
     def test_max_rejections_then_allow(self):
         conv_id = f"chk-limit-{time.time()}"
-        tracker = os.path.join(tempfile.gettempdir(), f"agy_start_{conv_id}")
+        tracker = os.path.join(get_cache_dir(), f"agy_start_{conv_id}")
         with open(tracker, "w") as f:
             f.write(str(time.time() - 300))
 
@@ -74,7 +87,7 @@ class TestStopRejectionLimit:
 class TestSkillsSummaryDetection:
     def test_summary_present_passes(self):
         conv_id = f"chk-pass-{time.time()}"
-        tracker = os.path.join(tempfile.gettempdir(), f"agy_start_{conv_id}")
+        tracker = os.path.join(get_cache_dir(), f"agy_start_{conv_id}")
         with open(tracker, "w") as f:
             f.write(str(time.time() - 300))
 
@@ -97,7 +110,7 @@ class TestSkillsSummaryDetection:
 
     def test_summary_case_insensitive(self):
         conv_id = f"chk-case-{time.time()}"
-        tracker = os.path.join(tempfile.gettempdir(), f"agy_start_{conv_id}")
+        tracker = os.path.join(get_cache_dir(), f"agy_start_{conv_id}")
         with open(tracker, "w") as f:
             f.write(str(time.time() - 300))
 
