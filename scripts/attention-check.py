@@ -172,6 +172,12 @@ def main():
                 elapsed = time.time() - float(f.read().strip())
         except Exception:
             pass
+    else:
+        try:
+            with open(tracker, "w") as f:
+                f.write(str(time.time()))
+        except Exception:
+            pass
 
     if elapsed <= args.timeout:
         reset_rejection_count(tracker)

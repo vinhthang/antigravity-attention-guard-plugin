@@ -142,3 +142,29 @@ class TestSkillsSummaryDetection:
         os.remove(tracker)
         os.remove(transcript)
 
+
+class TestTimerInitialization:
+    def test_first_stop_initializes_tracker(self):
+        conv_id = f"chk-init-{time.time()}"
+        tracker = os.path.join(get_cache_dir(), f"agy_start_{conv_id}")
+        if os.path.exists(tracker):
+            os.remove(tracker)
+
+        payload = {
+            "fullyIdle": True,
+            "modelName": "claude-opus-4.6",
+            "conversationId": conv_id,
+            "transcriptPath": "",
+            "workspacePaths": []
+        }
+
+        result = run_hook(payload, timeout_arg=120)
+        assert result == {}
+        assert os.path.exists(tracker)
+        with open(tracker, "r") as f:
+            ts = float(f.read().strip())
+        assert abs(time.time() - ts) < 5
+
+        if os.path.exists(tracker):
+            os.remove(tracker)
+
