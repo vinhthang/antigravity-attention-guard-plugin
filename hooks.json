@@ -15,6 +15,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "invoke_subagent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env python3 ./scripts/inject-rules.py",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "Stop": [
