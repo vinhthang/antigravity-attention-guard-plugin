@@ -17,7 +17,7 @@ RTK_COMPATIBLE = [
     "brew",
     "lsof", "ps ", "top", "htop",
     "find ", "rg ", "grep", "ag ",
-    "tree", "ls ", "ls\t",
+    "tree", "ls ",
     "glab", "gh ",
     "make", "cmake",
 ]
@@ -25,7 +25,6 @@ RTK_COMPATIBLE = [
 
 def split_env_prefix(cmd):
     """Split leading environment variable assignments and skippable prefixes from the command."""
-    import re
     match = re.match(r'^((?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+|sudo\s+|time\s+|nice\s+)*)(.*)', cmd)
     if match:
         return match.group(1), match.group(2)

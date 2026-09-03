@@ -1,11 +1,20 @@
-import sys, os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../scripts')))
-from common import is_subagent
 #!/usr/bin/env python3
-import subprocess
-import json
+import sys
 import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../scripts')))
+import importlib.util
+import json
+import subprocess
 import pytest
+from common import is_subagent
+
+spec = importlib.util.spec_from_file_location(
+    "enforce_delegation",
+    os.path.join(os.path.dirname(__file__), "../scripts/enforce-delegation.py")
+)
+enforce_mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(enforce_mod)
+WRITE_VERB_PREFIXES = enforce_mod.WRITE_VERB_PREFIXES
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "enforce-delegation.py")
 
@@ -51,4 +60,23 @@ class TestSubagentDetection:
         transcript.write_text('{"source": "SYSTEM", "type": "PLANNER_RESPONSE", "content": "[ANTIGRAVITY_SUBAGENT:123:456]"}\n')
         data = {"transcriptPath": str(transcript), "agent": {"model": "pro"}}
         assert is_subagent(data) is True
+
+    def test_model_name_fallback_detection(self):
+        assert is_subagent({"modelName": "gemini-2.0-flash"}) is True
+        assert is_subagent({"modelName": "gemini-2.0-flash-lite"}) is True
+        assert is_subagent({"modelName": "claude-3-5-sonnet"}) is False
+        assert is_subagent({}) is False
+
+
+class TestWriteVerbPrefixes:
+    def test_write_verbs_present(self):
+        expected_verbs = [
+            "write", "edit", "create", "update", "delete", "remove",
+            "push", "move", "fork", "insert", "modify", "set", "put",
+            "patch", "deploy", "add", "transition", "fill",
+            "merge", "submit", "approve", "publish", "archive", "send", "commit", "upload",
+        ]
+        for verb in expected_verbs:
+            assert verb in WRITE_VERB_PREFIXES
+
 

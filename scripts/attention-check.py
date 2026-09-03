@@ -1,8 +1,10 @@
-import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
 #!/usr/bin/env python3
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+import json
+import time
 from common import is_subagent, get_cache_dir
-import sys, json, os, time, argparse
 
 MAX_STOP_REJECTIONS = 3
 
@@ -124,10 +126,6 @@ def reset_rejection_count(tracker):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--timeout", type=int, default=120)
-    args, _ = parser.parse_known_args()
-
     try:
         payload = json.load(sys.stdin)
     except Exception:
