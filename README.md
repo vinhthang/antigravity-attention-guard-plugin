@@ -1,15 +1,16 @@
 # Antigravity Attention Guard Plugin
 
-> A deterministic lifecycle plugin for [Google Antigravity](https://antigravity.google) that prevents Attention Dilution in long-running AI agent sessions.
+> A deterministic lifecycle plugin for [Google Antigravity](https://antigravity.google) that prevents Attention Dilution in long-running AI agent sessions, enforcing strict agent safety, optimal LLM context window management, and robust subagent orchestration for complex agentic workflows.
 
-**Keywords**: antigravity, antigravity-plugin, google-antigravity, ai-agent, attention-dilution, context-window, llm-governance, agent-delegation, subagent, lifecycle-hooks, rtk, token-optimization
+**Keywords**: Google Antigravity plugins, LLM context window management, agent safety, agentic workflows, subagent orchestration, antigravity, antigravity-plugin, ai-agent, attention-dilution, context-window, llm-governance, agent-delegation, subagent, lifecycle-hooks, rtk, token-optimization
 
 ## Features
 
 | Hook | Script | Purpose |
 |---|---|---|
-| PreToolUse | `enforce-delegation.py` | Blocks Primary Agent from code modification, shell execution, and MCP write tools. Forces delegation to Flash subagents. |
+| PreToolUse | `enforce-delegation.py` | Blocks Primary Agent from code modification, shell execution, and MCP write tools. Forces delegation to subagents. |
 | PreToolUse | `rtk-enforcer.py` | Auto-prepends `rtk` to subagent commands for 60-95% output token compression. Gracefully skips if RTK is not installed. |
+| PreToolUse | `inject-rules.py` | Dynamically injects robust subagent detection markers and liveness tracking rules into subagent prompts. |
 | Stop | `attention-check.py` | Verifies agent output quality. Forces re-reading of all project and global rules if the agent forgets to summarize its work. Max 3 retries to prevent infinite loops. |
 
 ## Installation
@@ -32,10 +33,12 @@ Antigravity instantly applies updates without restart.
 
 ### Agent Delegation Protocol
 
-The plugin enforces a strict two-phase lifecycle:
+The plugin enforces a strict two-phase lifecycle for safe agentic workflows:
 
 1. **Phase 1 (Primary Agent)**: High-level reasoning, planning, and artifact creation only. No direct code changes.
-2. **Phase 2 (Subagents)**: Spawned with `Model: "flash"` to execute code changes, run commands, and validate checks.
+2. **Phase 2 (Subagents)**: Spawned to execute code changes, run commands, and validate checks. 
+
+Thanks to deterministic transcript markers injected into the subagents' prompts, **any** subagent model (`flash`, `pro`, `flash_lite`, `inherit`, etc.) is now fully supported.
 
 ### Dynamic MCP Write Tool Discovery
 
@@ -43,15 +46,11 @@ The plugin automatically scans `~/.gemini/antigravity/mcp/` to discover installe
 
 ### RTK Auto-Enforcement
 
-If [RTK (Rust Token Killer)](https://github.com/vinhthang/rtk) is installed, the plugin automatically prepends `rtk` to subagent commands to compress output by 60-95%. Simple commands (`echo`, `mkdir`, `cp`, `chmod`) and already-prefixed commands are skipped.
+If [RTK (Rust Token Killer)](https://github.com/vinhthang/rtk) is installed, the plugin automatically prepends `rtk` to subagent commands to compress output by 60-95%. The intelligent regex accurately detects tool commands and prepends `rtk` correctly even when environment variables are prepended (e.g., `FOO=bar cargo build` becomes `FOO=bar rtk cargo build`). Simple commands (`echo`, `mkdir`, `cp`, `chmod`) and already-prefixed commands are skipped.
 
-## Subagent Detection Limitation
+### Grace Period & Liveness Tracking
 
-The Antigravity hook payload only exposes `modelName` for agent identification. There is no `isSubagent` field in the official hook contract.
-
-- Subagents **MUST** be spawned with `Model: "flash"` for detection to work.
-- Subagents spawned with `Model: "inherit"` or `Model: "pro"` will be incorrectly blocked.
-- This is a platform limitation, not a plugin bug.
+To ensure optimal agent performance and prevent unnecessary nagging on quick tasks, the Stop hook implements a **120-second grace period** for the Attention Check. Additionally, the plugin enforces a **mandatory 5-minute liveness tracking rule** for all subagents. This ensures the Primary Agent sets a liveness timer when spawning subagents, preventing the Primary Agent from sleeping indefinitely if a subagent hangs.
 
 ## Running Tests
 
@@ -62,8 +61,8 @@ pytest tests/ -v
 ## Compatibility
 
 - **Platforms**: macOS, Linux, Windows (Python 3.6+)
-- **Primary Agent Models**: Gemini, Claude, GPT (any model without "flash" in the name)
-- **Subagent Models**: Any model with "flash" in the name (e.g., `gemini-3.7-flash-tiered`)
+- **Primary Agent Models**: Any model (e.g., Gemini, Claude, GPT)
+- **Subagent Models**: **ALL** subagent models are supported (`flash`, `pro`, `inherit`, etc.)
 - **RTK**: Optional. Plugin works without RTK installed.
 
 ## Platform Compatibility
@@ -77,4 +76,3 @@ pytest tests/ -v
 ## License
 
 MIT
-
