@@ -2,7 +2,7 @@
   "attention-guard-plugin": {
     "PreToolUse": [
       {
-        "matcher": "run_command|replace_file_content|multi_replace_file_content|write_to_file|call_mcp_tool",
+        "matcher": "run_command|replace_file_content|multi_replace_file_content|write_to_file|call_mcp_tool|generate_image",
         "hooks": [
           {
             "type": "command",
@@ -30,7 +30,7 @@
     "Stop": [
       {
         "type": "command",
-        "command": "/usr/bin/env python3 ./scripts/attention-check.py --timeout 120",
+        "command": "/usr/bin/env python3 ./scripts/attention-check.py",
         "timeout": 5
       }
     ]

@@ -19,10 +19,10 @@ def get_cache_dir():
     return cache_dir
 
 
-def run_hook(payload, timeout_arg=120):
+def run_hook(payload):
     env = os.environ.copy()
     result = subprocess.run(
-        ["python3", SCRIPT, "--timeout", str(timeout_arg)],
+        ["python3", SCRIPT],
         input=json.dumps(payload),
         capture_output=True, text=True, timeout=10,
         env=env
@@ -43,7 +43,7 @@ class TestSubagentSkip:
 
     def test_subagent_with_marker_skipped(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text('{"type": "USER_INPUT", "content": "Execute task\\n\\n[ANTIGRAVITY_SUBAGENT:conv-123:456]"}\n')
+        transcript.write_text('{"source": "SYSTEM", "type": "PLANNER_RESPONSE", "content": "Execute task\\n\\n[ANTIGRAVITY_SUBAGENT:conv-123:456]"}\n')
         result = run_hook({
             "fullyIdle": True,
             "modelName": "claude-opus-4.6",
@@ -76,11 +76,11 @@ class TestStopRejectionLimit:
 
         # First 3 rejections should return "continue"
         for i in range(3):
-            result = run_hook(payload, timeout_arg=120)
+            result = run_hook(payload)
             assert result.get("decision") == "continue", f"Rejection {i+1} should block"
 
         # 4th attempt should allow (max rejections reached)
-        result = run_hook(payload, timeout_arg=120)
+        result = run_hook(payload)
         assert result == {}, "Should allow after max rejections"
 
         # Cleanup
@@ -106,7 +106,7 @@ class TestSkillsSummaryDetection:
             "conversationId": conv_id,
             "transcriptPath": transcript,
             "workspacePaths": []
-        }, timeout_arg=120)
+        })
         assert result == {}
         os.remove(transcript)
 
@@ -124,7 +124,7 @@ class TestSkillsSummaryDetection:
             "conversationId": conv_id,
             "transcriptPath": transcript,
             "workspacePaths": []
-        }, timeout_arg=120)
+        })
         assert result == {}
         os.remove(transcript)
 
