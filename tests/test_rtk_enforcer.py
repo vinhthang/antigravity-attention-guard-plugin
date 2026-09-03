@@ -1,3 +1,12 @@
+
+import importlib.util
+import sys
+import os
+spec = importlib.util.spec_from_file_location("rtk_enforcer", os.path.join(os.path.dirname(__file__), "../scripts/rtk-enforcer.py"))
+rtk_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rtk_module)
+should_prepend_rtk = rtk_module.should_prepend_rtk
+split_env_prefix = rtk_module.split_env_prefix
 #!/usr/bin/env python3
 import json
 import os
@@ -66,14 +75,14 @@ class TestRTKEnforcement:
             "toolCall": {"name": "run_command", "args": {"CommandLine": "RUST_LOG=debug cargo build"}}
         })
         assert result["decision"] == "allow"
-        assert result["overwrite"]["CommandLine"] == "rtk RUST_LOG=debug cargo build"
+        assert result["overwrite"]["CommandLine"] == "RUST_LOG=debug rtk cargo build"
 
     def test_prepends_rtk_with_multiple_env_vars(self):
         result = run_hook({
             "toolCall": {"name": "run_command", "args": {"CommandLine": "FOO=bar RUST_LOG=debug cargo build"}}
         })
         assert result["decision"] == "allow"
-        assert result["overwrite"]["CommandLine"] == "rtk FOO=bar RUST_LOG=debug cargo build"
+        assert result["overwrite"]["CommandLine"] == "FOO=bar RUST_LOG=debug rtk cargo build"
 
 
 class TestSkipAlreadyRTK:
@@ -190,3 +199,10 @@ class TestRTKNotInstalled:
         assert "overwrite" not in output
 
 
+
+    def test_prepends_rtk_with_sudo(self):
+        cmd = "sudo cargo build"
+        assert should_prepend_rtk(cmd) is True
+        prefix, core = split_env_prefix(cmd)
+        assert prefix == "sudo "
+        assert core == "cargo build"

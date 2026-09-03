@@ -23,21 +23,24 @@ RTK_COMPATIBLE = [
 ]
 
 
-def should_prepend_rtk(cmd):
-    """Check if the command should have RTK prepended."""
-    cmd_stripped = cmd.strip()
-    if not cmd_stripped:
-        return False
-    # Skip if command already starts with rtk or pipes to rtk
-    if cmd_stripped.lower().startswith("rtk") or "| rtk" in cmd_stripped.lower():
-        return False
-    # Check if command starts with an allowlisted prefix, even if environment variables are prepended
-    pattern = re.compile(
-        r'^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*(' + '|'.join(re.escape(p) for p in RTK_COMPATIBLE) + ')',
-        re.IGNORECASE
-    )
-    return bool(pattern.match(cmd_stripped))
+def split_env_prefix(cmd):
+    """Split leading environment variable assignments and skippable prefixes from the command."""
+    import re
+    match = re.match(r'^((?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+|sudo\s+|time\s+|nice\s+)*)(.*)', cmd)
+    if match:
+        return match.group(1), match.group(2)
+    return "", cmd
 
+def should_prepend_rtk(cmd):
+    prefix, core_cmd = split_env_prefix(cmd)
+    if not core_cmd:
+        return False
+    if "| rtk" in cmd:
+        return False
+    for allow in RTK_COMPATIBLE:
+        if core_cmd.startswith(allow):
+            return True
+    return False
 
 def main():
     try:
@@ -72,7 +75,8 @@ def main():
             return
 
         # Prepend rtk to the command
-        rtk_command = f"rtk {command_line}"
+        prefix, core_cmd = split_env_prefix(command_line)
+        rtk_command = f"{prefix}rtk {core_cmd}"
         print(json.dumps({
             "decision": "allow",
             "overwrite": {

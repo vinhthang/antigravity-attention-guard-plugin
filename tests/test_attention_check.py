@@ -2,7 +2,6 @@
 import subprocess
 import json
 import os
-import time
 import tempfile
 import pytest
 
@@ -60,10 +59,7 @@ class TestSubagentSkip:
 
 class TestStopRejectionLimit:
     def test_max_rejections_then_allow(self):
-        conv_id = f"chk-limit-{time.time()}"
-        tracker = os.path.join(get_cache_dir(), f"agy_start_{conv_id}")
-        with open(tracker, "w") as f:
-            f.write(str(time.time() - 300))
+        conv_id = f"chk-limit-1234"
 
         transcript = os.path.join(tempfile.gettempdir(), f"transcript_{conv_id}.jsonl")
         create_transcript(transcript, [
@@ -88,8 +84,8 @@ class TestStopRejectionLimit:
         assert result == {}, "Should allow after max rejections"
 
         # Cleanup
-        os.remove(tracker)
         os.remove(transcript)
+        tracker = os.path.join(get_cache_dir(), f"reject_count_{conv_id}")
         count_file = tracker + "_stop_count"
         if os.path.exists(count_file):
             os.remove(count_file)
@@ -97,10 +93,7 @@ class TestStopRejectionLimit:
 
 class TestSkillsSummaryDetection:
     def test_summary_present_passes(self):
-        conv_id = f"chk-pass-{time.time()}"
-        tracker = os.path.join(get_cache_dir(), f"agy_start_{conv_id}")
-        with open(tracker, "w") as f:
-            f.write(str(time.time() - 300))
+        conv_id = f"chk-pass-1234"
 
         transcript = os.path.join(tempfile.gettempdir(), f"transcript_{conv_id}.jsonl")
         create_transcript(transcript, [
@@ -115,15 +108,10 @@ class TestSkillsSummaryDetection:
             "workspacePaths": []
         }, timeout_arg=120)
         assert result == {}
-
-        os.remove(tracker)
         os.remove(transcript)
 
     def test_summary_case_insensitive(self):
-        conv_id = f"chk-case-{time.time()}"
-        tracker = os.path.join(get_cache_dir(), f"agy_start_{conv_id}")
-        with open(tracker, "w") as f:
-            f.write(str(time.time() - 300))
+        conv_id = f"chk-case-1234"
 
         transcript = os.path.join(tempfile.gettempdir(), f"transcript_{conv_id}.jsonl")
         create_transcript(transcript, [
@@ -138,33 +126,6 @@ class TestSkillsSummaryDetection:
             "workspacePaths": []
         }, timeout_arg=120)
         assert result == {}
-
-        os.remove(tracker)
         os.remove(transcript)
 
-
-class TestTimerInitialization:
-    def test_first_stop_initializes_tracker(self):
-        conv_id = f"chk-init-{time.time()}"
-        tracker = os.path.join(get_cache_dir(), f"agy_start_{conv_id}")
-        if os.path.exists(tracker):
-            os.remove(tracker)
-
-        payload = {
-            "fullyIdle": True,
-            "modelName": "claude-opus-4.6",
-            "conversationId": conv_id,
-            "transcriptPath": "",
-            "workspacePaths": []
-        }
-
-        result = run_hook(payload, timeout_arg=120)
-        assert result == {}
-        assert os.path.exists(tracker)
-        with open(tracker, "r") as f:
-            ts = float(f.read().strip())
-        assert abs(time.time() - ts) < 5
-
-        if os.path.exists(tracker):
-            os.remove(tracker)
 

@@ -1,32 +1,14 @@
+import sys, os
+sys.path.insert(0, os.path.dirname(__file__))
 #!/usr/bin/env python3
+from common import is_subagent, get_cache_dir
 import sys, json, os, time, argparse
 
 MAX_STOP_REJECTIONS = 3
 
 
-def get_cache_dir():
-    cache_dir = os.environ.get("AGY_CACHE_DIR") or os.path.expanduser("~/.gemini/antigravity/cache")
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
 
 
-def is_subagent(data):
-    """Detect if the current agent is a subagent via modelName or transcript marker."""
-    model_name = data.get("modelName", "").lower()
-    if "flash" in model_name:
-        return True
-
-    transcript_path = data.get("transcriptPath", "")
-    if transcript_path and os.path.exists(transcript_path):
-        try:
-            with open(transcript_path, "rb") as f:
-                chunk = f.read(8192)
-            if b"[ANTIGRAVITY_SUBAGENT:" in chunk:
-                return True
-        except Exception:
-            pass
-
-    return False
 
 
 def find_rules(workspace_paths):
@@ -162,29 +144,9 @@ def main():
         print(json.dumps({}))
         return
 
-    # Check elapsed time
-    conv_id = payload.get("conversationId", "unknown")
-    tracker = os.path.join(get_cache_dir(), f"agy_start_{conv_id}")
-    elapsed = 0
-    if os.path.exists(tracker):
-        try:
-            with open(tracker, "r") as f:
-                elapsed = time.time() - float(f.read().strip())
-        except Exception:
-            pass
-    else:
-        try:
-            with open(tracker, "w") as f:
-                f.write(str(time.time()))
-        except Exception:
-            pass
-
-    if elapsed <= args.timeout:
-        reset_rejection_count(tracker)
-        print(json.dumps({}))
-        return
-
     # Get last model response efficiently (reverse scan)
+    conv_id = payload.get("conversationId", "unknown")
+    tracker = os.path.join(get_cache_dir(), f"reject_count_{conv_id}")
     transcript_path = payload.get("transcriptPath", "")
     last_model_content = get_last_model_content(transcript_path)
 
@@ -221,7 +183,7 @@ def main():
             "Re-read them carefully and correct your response.\n\n"
             + "\n\n".join(rule_contents)
         )
-        print(json.dumps({"decision": "continue", "injectSteps": [{"ephemeralMessage": injected_text}]}))
+        print(json.dumps({"decision": "continue", "reason": injected_text}))
     else:
         reset_rejection_count(tracker)
         print(json.dumps({}))

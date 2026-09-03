@@ -1,10 +1,12 @@
+import sys, os
+sys.path.insert(0, os.path.dirname(__file__))
 #!/usr/bin/env python3
+from common import is_subagent, get_cache_dir
 import sys
 import json
 import os
 import re
 import time
-import sqlite3
 
 
 # Verb prefixes that indicate a mutating/write MCP tool
@@ -18,10 +20,6 @@ MCP_SCHEMA_DIR = os.path.expanduser("~/.gemini/antigravity/mcp")
 MCP_CACHE_TTL = 300  # seconds
 
 
-def get_cache_dir():
-    cache_dir = os.environ.get("AGY_CACHE_DIR") or os.path.expanduser("~/.gemini/antigravity/cache")
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
 
 
 def discover_mcp_write_tools():
@@ -86,10 +84,6 @@ def is_artifact_path(target_file, artifact_dir):
     return bool(re.search(r'/brain/[0-9a-f-]{36}/', norm_target))
 
 
-def has_protobuf_field_5(blob: bytes) -> bool:
-    """Check if protobuf blob contains Field 5 (parent_conversation_id)."""
-    if not blob or not isinstance(blob, (bytes, bytearray)):
-        return False
     idx = 0
     blob_len = len(blob)
     while idx < blob_len:
@@ -283,7 +277,7 @@ def main():
             "reason": (
                 "Attention Dilution Guard: The Primary Agent is restricted to planning "
                 "and artifact creation. Direct code modification and shell execution must be "
-                "delegated to a subagent (Model: 'flash')."
+                "delegated to a subagent."
             )
         }))
     except json.JSONDecodeError:

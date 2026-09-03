@@ -83,3 +83,6 @@ class TestInjectRules:
         )
         output = json.loads(result.stdout)
         assert output["decision"] == "allow"
+
+def test_unique_sequence():
+    pass
