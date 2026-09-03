@@ -130,3 +130,98 @@ class TestMCPToolCoverage:
         })
         assert result["decision"] == "allow"
 
+
+class TestSQLiteProtobufDetection:
+    def test_pro_subagent_with_field_5_allowed(self):
+        import uuid
+        import sqlite3
+
+        test_id = f"test-subagent-{uuid.uuid4()}"
+        db_dir = os.path.expanduser("~/.gemini/antigravity/conversations")
+        os.makedirs(db_dir, exist_ok=True)
+        db_path = os.path.join(db_dir, f"{test_id}.db")
+
+        try:
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("CREATE TABLE trajectory_metadata_blob (id TEXT PRIMARY KEY, data BLOB);")
+                # Field 5 wire format: (5<<3)|2 = 0x2a ('*'), length 0x04, payload b'test'
+                conn.execute("INSERT INTO trajectory_metadata_blob VALUES ('main', ?)", (b"\x2a\x04test",))
+
+            result = run_hook({
+                "conversationId": test_id,
+                "modelName": "claude-opus-4.6",
+                "toolCall": {"name": "run_command", "args": {"CommandLine": "ls"}}
+            })
+            assert result["decision"] == "allow"
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
+    def test_primary_agent_on_flash_blocked(self):
+        import uuid
+        import sqlite3
+
+        test_id = f"test-primary-{uuid.uuid4()}"
+        db_dir = os.path.expanduser("~/.gemini/antigravity/conversations")
+        os.makedirs(db_dir, exist_ok=True)
+        db_path = os.path.join(db_dir, f"{test_id}.db")
+
+        try:
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("CREATE TABLE trajectory_metadata_blob (id TEXT PRIMARY KEY, data BLOB);")
+                # Field 1 wire format (no Field 5)
+                conn.execute("INSERT INTO trajectory_metadata_blob VALUES ('main', ?)", (b"\x08\x01",))
+
+            result = run_hook({
+                "conversationId": test_id,
+                "modelName": "gemini-2.0-flash",
+                "toolCall": {"name": "run_command", "args": {"CommandLine": "touch /tmp/bad"}}
+            })
+            assert result["decision"] == "deny"
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
+    def test_missing_db_fallback_flash_allowed(self):
+        result = run_hook({
+            "conversationId": "non-existent-conv-id",
+            "modelName": "gemini-2.0-flash",
+            "toolCall": {"args": {}}
+        })
+        assert result["decision"] == "allow"
+
+    def test_missing_db_fallback_pro_blocked(self):
+        result = run_hook({
+            "conversationId": "non-existent-conv-id",
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"args": {"TargetFile": "/some/code.py"}}
+        })
+        assert result["decision"] == "deny"
+
+    def test_brain_index_db_detection(self):
+        import sqlite3
+
+        brain_dir = os.path.expanduser("~/.gemini/antigravity/brain")
+        os.makedirs(brain_dir, exist_ok=True)
+        index_db = os.path.join(brain_dir, "index.db")
+        created = False
+
+        try:
+            if not os.path.exists(index_db):
+                created = True
+                with sqlite3.connect(index_db) as conn:
+                    conn.execute("CREATE TABLE trajectory_metadata (conversation_id TEXT PRIMARY KEY, data BLOB);")
+                    conn.execute("INSERT INTO trajectory_metadata VALUES (?, ?)", ("index-sub-1", b"\x2a\x04test"))
+
+            result = run_hook({
+                "conversationId": "index-sub-1",
+                "modelName": "claude-opus-4.6",
+                "toolCall": {"name": "run_command", "args": {"CommandLine": "ls"}}
+            })
+            assert result["decision"] == "allow"
+        finally:
+            if created and os.path.exists(index_db):
+                os.remove(index_db)
+
+
+

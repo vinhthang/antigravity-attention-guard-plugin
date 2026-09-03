@@ -5,6 +5,8 @@ import os
 import re
 import hashlib
 import time
+import sqlite3
+
 
 # Verb prefixes that indicate a mutating/write MCP tool
 WRITE_VERB_PREFIXES = (
@@ -85,41 +87,147 @@ def is_artifact_path(target_file, artifact_dir):
     return bool(re.search(r'/brain/[0-9a-f-]{36}/', norm_target))
 
 
-def is_subagent(data):
-    """Detect if the current agent is a subagent.
-    
-    Primary signal: 'flash' in modelName.
-    Secondary signal: conversation ID differs from the tracked primary.
-    """
-    model_name = data.get("modelName", "").lower()
-    if "flash" in model_name:
-        return True
-    # Secondary: conversation ID tracking (per-workspace)
-    conv_id = data.get("conversationId", "")
-    workspace_paths = data.get("workspacePaths", [])
-    if conv_id and workspace_paths:
-        workspace_key = hashlib.md5("|".join(sorted(workspace_paths)).encode()).hexdigest()[:8]
-        tracker = os.path.join(get_cache_dir(), f"agy_primary_{workspace_key}")
-        if os.path.exists(tracker):
-            try:
-                with open(tracker, "r") as f:
-                    stored = json.loads(f.read().strip())
-                primary_id = stored.get("conversationId", "")
-                stored_time = stored.get("timestamp", 0)
-                # If tracker is older than 24 hours, treat as stale and overwrite
-                if time.time() - stored_time > 86400:
-                    with open(tracker, "w") as f:
-                        json.dump({"conversationId": conv_id, "timestamp": time.time()}, f)
+def has_protobuf_field_5(blob: bytes) -> bool:
+    """Check if protobuf blob contains Field 5 (parent_conversation_id)."""
+    if not blob or not isinstance(blob, (bytes, bytearray)):
+        return False
+    idx = 0
+    blob_len = len(blob)
+    while idx < blob_len:
+        key = 0
+        shift = 0
+        while idx < blob_len:
+            byte = blob[idx]
+            idx += 1
+            key |= (byte & 0x7F) << shift
+            if not (byte & 0x80):
+                break
+            shift += 7
+            if shift > 64:
+                return False
+
+        field_number = key >> 3
+        wire_type = key & 0x07
+
+        if field_number == 5:
+            return True
+
+        if wire_type == 0:  # Varint
+            while idx < blob_len and (blob[idx] & 0x80):
+                idx += 1
+            idx += 1
+        elif wire_type == 1:  # 64-bit
+            idx += 8
+        elif wire_type == 2:  # Length-delimited
+            length = 0
+            shift = 0
+            while idx < blob_len:
+                byte = blob[idx]
+                idx += 1
+                length |= (byte & 0x7F) << shift
+                if not (byte & 0x80):
+                    break
+                shift += 7
+                if shift > 64:
                     return False
-                if primary_id and primary_id != conv_id:
-                    return True  # Different conversation = subagent
-            except Exception:
-                pass
+            idx += length
+        elif wire_type == 5:  # 32-bit
+            idx += 4
         else:
-            # First invocation in this workspace — record as primary
-            with open(tracker, "w") as f:
-                json.dump({"conversationId": conv_id, "timestamp": time.time()}, f)
+            break
     return False
+
+
+def is_subagent(conversation_id, model_name=""):
+    """Deterministically detect if the current agent is a subagent.
+
+    1. Checks SQLite databases (index.db, antigravity.db, or {conversation_id}.db)
+       using a read-only URI (mode=ro, uri=True) to prevent SQLITE_BUSY deadlocks.
+    2. Wraps the connection in a `with sqlite3.connect(...) as conn:` block.
+    3. Queries the table containing trajectory_metadata for conversation_id.
+    4. Checks if the protobuf blob contains Field 5 (parent_conversation_id).
+    5. Gracefully falls back to '"flash" in model_name' if the DB is missing,
+       locked, or parsing fails.
+    """
+    if isinstance(conversation_id, dict):
+        data = conversation_id
+        conversation_id = data.get("conversationId", "")
+        model_name = data.get("modelName", "")
+
+    fallback = "flash" in (model_name or "").lower()
+
+    try:
+        candidate_paths = [
+            os.path.expanduser("~/.gemini/antigravity/brain/index.db"),
+            os.path.expanduser("~/.gemini/antigravity/antigravity.db"),
+        ]
+        if conversation_id:
+            candidate_paths.append(
+                os.path.expanduser(f"~/.gemini/antigravity/conversations/{conversation_id}.db")
+            )
+
+        for db_path in candidate_paths:
+            if not os.path.exists(db_path):
+                continue
+
+            # Requirement 1 & 2: Read-only URI and with sqlite3.connect(...) context manager
+            with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1.0) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%trajectory_metadata%'"
+                )
+                tables = [row[0] for row in cursor.fetchall()]
+
+                for table in tables:
+                    cursor.execute(f"PRAGMA table_info({table})")
+                    col_info = cursor.fetchall()
+                    col_names = [c[1] for c in col_info]
+
+                    blob_col = next(
+                        (
+                            c[1]
+                            for c in col_info
+                            if c[2].upper() == "BLOB"
+                            or c[1].lower() in ("data", "blob", "metadata", "trajectory_metadata")
+                        ),
+                        col_names[-1] if col_names else None,
+                    )
+                    if not blob_col:
+                        continue
+
+                    # Query the table containing trajectory_metadata for conversation_id
+                    rows = []
+                    if "conversation_id" in col_names and conversation_id:
+                        cursor.execute(
+                            f"SELECT {blob_col} FROM {table} WHERE conversation_id = ?",
+                            (conversation_id,),
+                        )
+                        rows = cursor.fetchall()
+                    elif "id" in col_names and conversation_id:
+                        cursor.execute(
+                            f"SELECT {blob_col} FROM {table} WHERE id = ?",
+                            (conversation_id,),
+                        )
+                        rows = cursor.fetchall()
+                        if not rows and f"/{conversation_id}.db" in db_path:
+                            cursor.execute(f"SELECT {blob_col} FROM {table} WHERE id = 'main'")
+                            rows = cursor.fetchall()
+                    elif "id" in col_names:
+                        cursor.execute(f"SELECT {blob_col} FROM {table} WHERE id = 'main'")
+                        rows = cursor.fetchall()
+                    else:
+                        cursor.execute(f"SELECT {blob_col} FROM {table} LIMIT 1")
+                        rows = cursor.fetchall()
+
+                    for row in rows:
+                        blob = row[0]
+                        if blob and isinstance(blob, (bytes, bytearray)):
+                            return has_protobuf_field_5(blob)
+
+        return fallback
+    except Exception:
+        # Requirement 3: Defensive Fallback
+        return fallback
 
 
 def main():
@@ -132,7 +240,9 @@ def main():
         data = json.loads(raw_payload)
 
         # Allow subagents to execute freely
-        if is_subagent(data):
+        conv_id = data.get("conversationId", "")
+        model_name = data.get("modelName", "")
+        if is_subagent(conv_id, model_name):
             print(json.dumps({"decision": "allow"}))
             return
 
