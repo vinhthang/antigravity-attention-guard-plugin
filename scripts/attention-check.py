@@ -11,15 +11,22 @@ def get_cache_dir():
 
 
 def is_subagent(data):
-    """Detect if the current agent is a subagent via modelName.
-    
-    Note: The Antigravity hook payload only provides modelName for agent
-    identification. Fields like isSubagent or parentConversationId are NOT
-    part of the official hook contract (verified via payload debugging).
-    Subagents MUST always be spawned with Model: 'flash' for detection to work.
-    """
+    """Detect if the current agent is a subagent via modelName or transcript marker."""
     model_name = data.get("modelName", "").lower()
-    return "flash" in model_name
+    if "flash" in model_name:
+        return True
+
+    transcript_path = data.get("transcriptPath", "")
+    if transcript_path and os.path.exists(transcript_path):
+        try:
+            with open(transcript_path, "rb") as f:
+                chunk = f.read(8192)
+            if b"[ANTIGRAVITY_SUBAGENT:" in chunk:
+                return True
+        except Exception:
+            pass
+
+    return False
 
 
 def find_rules(workspace_paths):

@@ -42,6 +42,17 @@ class TestSubagentSkip:
         result = run_hook({"fullyIdle": True, "modelName": "gemini-2.0-flash", "conversationId": "chk-1"})
         assert result == {}
 
+    def test_subagent_with_marker_skipped(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text('{"type": "USER_INPUT", "content": "Execute task\\n\\n[ANTIGRAVITY_SUBAGENT:conv-123:456]"}\n')
+        result = run_hook({
+            "fullyIdle": True,
+            "modelName": "claude-opus-4.6",
+            "conversationId": "chk-3",
+            "transcriptPath": str(transcript)
+        })
+        assert result == {}
+
     def test_not_fully_idle_skipped(self):
         result = run_hook({"fullyIdle": False, "modelName": "claude-opus-4.6", "conversationId": "chk-2"})
         assert result == {}

@@ -3,7 +3,6 @@ import sys
 import json
 import os
 import re
-import hashlib
 import time
 import sqlite3
 
@@ -138,21 +137,32 @@ def has_protobuf_field_5(blob: bytes) -> bool:
     return False
 
 
-def is_subagent(conversation_id, model_name=""):
+def is_subagent(conversation_id, model_name="", transcript_path=""):
     """Deterministically detect if the current agent is a subagent.
 
-    1. Checks SQLite databases (index.db, antigravity.db, or {conversation_id}.db)
+    1. Checks transcript marker [ANTIGRAVITY_SUBAGENT: in first 8KB if transcriptPath is provided.
+    2. Checks SQLite databases (index.db, antigravity.db, or {conversation_id}.db)
        using a read-only URI (mode=ro, uri=True) to prevent SQLITE_BUSY deadlocks.
-    2. Wraps the connection in a `with sqlite3.connect(...) as conn:` block.
-    3. Queries the table containing trajectory_metadata for conversation_id.
-    4. Checks if the protobuf blob contains Field 5 (parent_conversation_id).
-    5. Gracefully falls back to '"flash" in model_name' if the DB is missing,
+    3. Wraps the connection in a `with sqlite3.connect(...) as conn:` block.
+    4. Queries the table containing trajectory_metadata for conversation_id.
+    5. Checks if the protobuf blob contains Field 5 (parent_conversation_id).
+    6. Gracefully falls back to '"flash" in model_name' if the DB is missing,
        locked, or parsing fails.
     """
     if isinstance(conversation_id, dict):
         data = conversation_id
         conversation_id = data.get("conversationId", "")
         model_name = data.get("modelName", "")
+        transcript_path = data.get("transcriptPath", "")
+
+    if transcript_path and os.path.exists(transcript_path):
+        try:
+            with open(transcript_path, "rb") as f:
+                chunk = f.read(8192)
+            if b"[ANTIGRAVITY_SUBAGENT:" in chunk:
+                return True
+        except Exception:
+            pass
 
     fallback = "flash" in (model_name or "").lower()
 
@@ -242,7 +252,8 @@ def main():
         # Allow subagents to execute freely
         conv_id = data.get("conversationId", "")
         model_name = data.get("modelName", "")
-        if is_subagent(conv_id, model_name):
+        transcript_path = data.get("transcriptPath", "")
+        if is_subagent(conv_id, model_name, transcript_path):
             print(json.dumps({"decision": "allow"}))
             return
 

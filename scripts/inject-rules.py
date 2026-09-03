@@ -4,6 +4,9 @@ import json
 import os
 
 
+import time
+
+
 def main():
     try:
         input_data = sys.stdin.read()
@@ -17,21 +20,21 @@ def main():
         agents_rule = os.path.join(os.path.dirname(__file__), "..", "rules", "AGENTS.md")
         agents_rule = os.path.abspath(agents_rule)
 
-        if not os.path.exists(agents_rule):
-            print(json.dumps({"decision": "allow"}))
-            return
+        rules_text = ""
+        if os.path.exists(agents_rule):
+            with open(agents_rule, "r") as f:
+                rules_text = f.read()
 
-        with open(agents_rule, "r") as f:
-            rules_text = f.read()
-
-        injected = "\n\n--- INJECTED RULES ---\n" + rules_text
+        injected = ("\n\n--- INJECTED RULES ---\n" + rules_text) if rules_text else ""
 
         tool_call = payload.get("toolCall", {})
         if tool_call.get("name") == "invoke_subagent":
             args = tool_call.get("args", {})
             subagents = args.get("Subagents", [])
+            parent_conv_id = payload.get("conversationId", "unknown")
+            seq = int(time.time() * 1000)
             for sa in subagents:
-                sa["Prompt"] = sa.get("Prompt", "") + injected
+                sa["Prompt"] = sa.get("Prompt", "") + injected + f"\n\n[ANTIGRAVITY_SUBAGENT:{parent_conv_id}:{seq}]"
 
             print(json.dumps({
                 "decision": "allow",

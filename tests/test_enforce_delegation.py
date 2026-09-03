@@ -29,6 +29,26 @@ class TestSubagentDetection:
         result = run_hook({"modelName": "claude-opus-4.6", "toolCall": {"args": {}}})
         assert result["decision"] == "deny"
 
+    def test_subagent_with_marker_allowed(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text('{"type": "USER_INPUT", "content": "Execute task\\n\\n[ANTIGRAVITY_SUBAGENT:conv-123:456]"}\n')
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "transcriptPath": str(transcript),
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "ls"}}
+        })
+        assert result["decision"] == "allow"
+
+    def test_primary_agent_without_marker_blocked(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text('{"type": "USER_INPUT", "content": "Please write some code"}\n')
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "transcriptPath": str(transcript),
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "ls"}}
+        })
+        assert result["decision"] == "deny"
+
 
 class TestArtifactBypass:
     def test_artifact_path_allowed(self):

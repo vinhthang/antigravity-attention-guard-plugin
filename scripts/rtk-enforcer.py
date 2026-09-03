@@ -2,6 +2,7 @@
 import sys
 import json
 import shutil
+import re
 
 # Commands that benefit from RTK output compression
 RTK_COMPATIBLE = [
@@ -30,12 +31,12 @@ def should_prepend_rtk(cmd):
     # Skip if command already starts with rtk or pipes to rtk
     if cmd_stripped.lower().startswith("rtk") or "| rtk" in cmd_stripped.lower():
         return False
-    # Check if command starts with an allowlisted prefix
-    cmd_lower = cmd_stripped.lower()
-    for prefix in RTK_COMPATIBLE:
-        if cmd_lower.startswith(prefix.lower()):
-            return True
-    return False
+    # Check if command starts with an allowlisted prefix, even if environment variables are prepended
+    pattern = re.compile(
+        r'^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*(' + '|'.join(re.escape(p) for p in RTK_COMPATIBLE) + ')',
+        re.IGNORECASE
+    )
+    return bool(pattern.match(cmd_stripped))
 
 
 def main():

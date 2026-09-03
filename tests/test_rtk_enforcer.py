@@ -61,6 +61,20 @@ class TestRTKEnforcement:
         assert result["decision"] == "allow"
         assert result["overwrite"]["CommandLine"] == "rtk curl -s https://example.com"
 
+    def test_prepends_rtk_with_single_env_var(self):
+        result = run_hook({
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "RUST_LOG=debug cargo build"}}
+        })
+        assert result["decision"] == "allow"
+        assert result["overwrite"]["CommandLine"] == "rtk RUST_LOG=debug cargo build"
+
+    def test_prepends_rtk_with_multiple_env_vars(self):
+        result = run_hook({
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "FOO=bar RUST_LOG=debug cargo build"}}
+        })
+        assert result["decision"] == "allow"
+        assert result["overwrite"]["CommandLine"] == "rtk FOO=bar RUST_LOG=debug cargo build"
+
 
 class TestSkipAlreadyRTK:
     def test_skips_already_rtk(self):
@@ -124,6 +138,13 @@ class TestSkipNonCompatible:
     def test_skips_node(self):
         result = run_hook({
             "toolCall": {"name": "run_command", "args": {"CommandLine": "node server.js"}}
+        })
+        assert result["decision"] == "allow"
+        assert "overwrite" not in result
+
+    def test_skips_non_compatible_with_env_vars(self):
+        result = run_hook({
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "FOO=bar python3 myscript.py"}}
         })
         assert result["decision"] == "allow"
         assert "overwrite" not in result
