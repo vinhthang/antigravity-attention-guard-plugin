@@ -20,8 +20,6 @@ MCP_SCHEMA_DIR = os.path.expanduser("~/.gemini/antigravity/mcp")
 MCP_CACHE_TTL = 300  # seconds
 
 
-
-
 def discover_mcp_write_tools():
     """Scan MCP schema directories to discover write/mutating tools.
     
@@ -52,7 +50,6 @@ def discover_mcp_write_tools():
                     if not filename.endswith(".json"):
                         continue
                     tool_name = filename[:-5]  # Remove .json
-                    # Check if tool name starts with a write verb prefix
                     tool_lower = tool_name.lower()
                     for prefix in WRITE_VERB_PREFIXES:
                         if tool_lower.startswith(prefix):
@@ -72,15 +69,17 @@ def discover_mcp_write_tools():
 
 
 def is_artifact_path(target_file, artifact_dir):
-    """Check if target_file is within the artifact (brain/) directory."""
+    """Check if target_file is within the artifact (brain/) directory.
+    Uses realpath to prevent symlink escapes.
+    """
     if not target_file:
         return False
-    norm_target = os.path.normpath(os.path.abspath(target_file))
+    norm_target = os.path.realpath(os.path.abspath(target_file))
     if artifact_dir:
-        norm_artifact = os.path.normpath(os.path.abspath(artifact_dir))
-        if norm_target.startswith(norm_artifact):
+        norm_artifact = os.path.realpath(os.path.abspath(artifact_dir))
+        if norm_target.startswith(norm_artifact + os.sep) or norm_target == norm_artifact:
             return True
-    # Fallback: require brain/<uuid>/ pattern (Antigravity conversation IDs are UUIDs)
+    # Fallback: require brain/<uuid>/ pattern
     return bool(re.search(r'/brain/[0-9a-f-]{36}/', norm_target))
 
 
@@ -98,8 +97,9 @@ def main():
             print(json.dumps({"decision": "allow"}))
             return
 
-        # Allow Primary Agent to write artifacts (implementation_plan.md, task.md, etc.)
+        # Allow Primary Agent to write artifacts
         tool_call = data.get("toolCall", {})
+        tool_name = tool_call.get("name", "")
         args = tool_call.get("args", {})
         target_file = args.get("TargetFile", "") or args.get("target_file", "") or args.get("path", "")
         artifact_dir = data.get("artifactDirectoryPath", "")
@@ -108,11 +108,14 @@ def main():
             print(json.dumps({"decision": "allow"}))
             return
 
+        # Allow Primary Agent to generate images (used for artifacts and UI mockups)
+        if tool_name == "generate_image":
+            print(json.dumps({"decision": "allow"}))
+            return
+
         # Check if this is an MCP tool call
-        tool_name = tool_call.get("name", "")
         if tool_name == "call_mcp_tool":
             mcp_tool = args.get("ToolName", "").lower()
-            # Discover MCP write tools dynamically from schema directories
             mcp_write_tools = discover_mcp_write_tools()
             if mcp_tool not in mcp_write_tools:
                 print(json.dumps({"decision": "allow"}))

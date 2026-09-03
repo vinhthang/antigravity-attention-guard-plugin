@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 import sys
-import json
 import os
+sys.path.insert(0, os.path.dirname(__file__))
+import json
 import time
-
+from common import get_cache_dir
 
 def main():
     try:
@@ -14,7 +15,7 @@ def main():
 
         payload = json.loads(input_data)
 
-        # Read the plugin's own AGENTS.md (relative to this script)
+        # Read the plugin's own AGENTS.md
         agents_rule = os.path.join(os.path.dirname(__file__), "..", "rules", "AGENTS.md")
         agents_rule = os.path.abspath(agents_rule)
 
@@ -30,6 +31,16 @@ def main():
             args = tool_call.get("args", {})
             subagents = args.get("Subagents", [])
             parent_conv_id = payload.get("conversationId", "unknown")
+            
+            # Record the PRIMARY agent's conversationId
+            cache_dir = get_cache_dir()
+            try:
+                primary_file = os.path.join(cache_dir, f"agy_primary_{parent_conv_id}")
+                with open(primary_file, "w") as f:
+                    f.write(str(time.time()))
+            except Exception:
+                pass
+            
             base_seq = int(time.time() * 1000)
             for i, sa in enumerate(subagents):
                 marker = f"[ANTIGRAVITY_SUBAGENT:{parent_conv_id}:{base_seq + i}]"

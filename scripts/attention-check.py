@@ -7,10 +7,7 @@ import time
 from common import is_subagent, get_cache_dir
 
 MAX_STOP_REJECTIONS = 3
-
-
-
-
+MAX_INJECTION_BYTES = 16384
 
 
 def find_rules(workspace_paths):
@@ -24,7 +21,7 @@ def find_rules(workspace_paths):
             if f.endswith(".md"):
                 rules.append(os.path.join(plugin_rules_dir, f))
 
-    # 2. Workspace-level instructions (GEMINI.md, AGENTS.md, .agents/rules/)
+    # 2. Workspace-level instructions
     for wp in workspace_paths:
         if not wp or not os.path.exists(wp):
             continue
@@ -86,7 +83,6 @@ def get_last_model_content(transcript_path):
                             return record.get("content", "")
                     except Exception:
                         continue
-            # Check remainder
             if remainder.strip():
                 try:
                     record = json.loads(remainder.decode("utf-8"))
@@ -100,7 +96,6 @@ def get_last_model_content(transcript_path):
 
 
 def get_rejection_count(tracker):
-    """Read the stop rejection counter."""
     count_file = tracker + "_stop_count"
     if os.path.exists(count_file):
         try:
@@ -153,7 +148,6 @@ def main():
         return
 
     if "summary of skills used:" not in last_model_content.lower():
-        # Prevent infinite rejection loop
         rejection_count = get_rejection_count(tracker)
         if rejection_count >= MAX_STOP_REJECTIONS:
             reset_rejection_count(tracker)
@@ -165,7 +159,6 @@ def main():
         workspace_paths = payload.get("workspacePaths", [])
         rules_to_read = find_rules(workspace_paths)
 
-        # Read all rule file contents directly
         rule_contents = []
         for rule_path in rules_to_read:
             try:
@@ -181,6 +174,10 @@ def main():
             "Re-read them carefully and correct your response.\n\n"
             + "\n\n".join(rule_contents)
         )
+        # Cap injection to prevent context overflow
+        if len(injected_text.encode("utf-8")) > MAX_INJECTION_BYTES:
+            injected_text = injected_text[:MAX_INJECTION_BYTES] + "\n\n[... truncated to prevent context overflow ...]"
+        
         print(json.dumps({"decision": "continue", "reason": injected_text}))
     else:
         reset_rejection_count(tracker)

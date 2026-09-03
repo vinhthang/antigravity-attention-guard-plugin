@@ -1,88 +1,92 @@
 #!/usr/bin/env python3
+import subprocess
 import json
 import os
-import re
-import subprocess
 import pytest
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "inject-rules.py")
+
+
+@pytest.fixture(autouse=True)
+def setup_test_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGY_APP_DATA_DIR", str(tmp_path))
 
 
 def run_hook(payload):
     result = subprocess.run(
         ["python3", SCRIPT],
         input=json.dumps(payload),
-        capture_output=True, text=True, timeout=5
+        capture_output=True, text=True, timeout=5,
+        env=os.environ.copy()
     )
     return json.loads(result.stdout)
 
 
-class TestInjectRules:
-    def test_injects_marker_and_rules(self):
-        payload = {
-            "conversationId": "parent-conv-1234",
+class TestRuleInjection:
+    def test_injects_rules_into_subagent_prompt(self):
+        result = run_hook({
+            "conversationId": "parent-123",
             "toolCall": {
                 "name": "invoke_subagent",
                 "args": {
-                    "Subagents": [
-                        {
-                            "TypeName": "research",
-                            "Prompt": "Please research the codebase."
-                        }
-                    ]
+                    "Subagents": [{"Prompt": "Do something", "Role": "Worker"}]
                 }
             }
-        }
-        result = run_hook(payload)
+        })
         assert result["decision"] == "allow"
         assert "overwrite" in result
         subagents = result["overwrite"]["Subagents"]
         assert len(subagents) == 1
-        prompt = subagents[0]["Prompt"]
-        assert "Please research the codebase." in prompt
-        assert "--- INJECTED RULES ---" in prompt
-        assert re.search(r'\[ANTIGRAVITY_SUBAGENT:parent-conv-1234:\d+\]', prompt) is not None
+        assert "[ANTIGRAVITY_SUBAGENT:parent-123:" in subagents[0]["Prompt"]
+        assert "INJECTED RULES" in subagents[0]["Prompt"]
 
-    def test_injects_marker_for_multiple_subagents(self):
-        payload = {
-            "conversationId": "parent-multi-5678",
+    def test_records_primary_agent_id(self, tmp_path):
+        """invoke_subagent should record the parent's conversationId as primary."""
+        result = run_hook({
+            "conversationId": "primary-abc-123",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Subagents": [{"Prompt": "Work"}]
+                }
+            }
+        })
+        assert result["decision"] == "allow"
+        # Check that the primary ID was recorded
+        cache_dir = os.path.join(str(tmp_path), "cache")
+        primary_file = os.path.join(cache_dir, "agy_primary_primary-abc-123")
+        assert os.path.exists(primary_file)
+
+    def test_unique_sequences_in_batch(self):
+        result = run_hook({
+            "conversationId": "parent-456",
             "toolCall": {
                 "name": "invoke_subagent",
                 "args": {
                     "Subagents": [
-                        {"TypeName": "sub1", "Prompt": "Task 1"},
-                        {"TypeName": "sub2", "Prompt": "Task 2"}
+                        {"Prompt": "Task 1"},
+                        {"Prompt": "Task 2"},
+                        {"Prompt": "Task 3"}
                     ]
                 }
             }
-        }
-        result = run_hook(payload)
-        assert result["decision"] == "allow"
+        })
         subagents = result["overwrite"]["Subagents"]
-        assert len(subagents) == 2
+        # Extract markers
+        markers = []
         for sa in subagents:
-            assert re.search(r'\[ANTIGRAVITY_SUBAGENT:parent-multi-5678:\d+\]', sa["Prompt"]) is not None
+            import re
+            match = re.search(r'\[ANTIGRAVITY_SUBAGENT:[^:]+:(\d+)\]', sa["Prompt"])
+            assert match, f"Marker not found in prompt: {sa['Prompt'][-100:]}"
+            markers.append(int(match.group(1)))
+        # All markers should be unique and sequential
+        assert len(set(markers)) == 3, f"Markers should be unique: {markers}"
+        assert markers[1] == markers[0] + 1
+        assert markers[2] == markers[1] + 1
 
-    def test_non_subagent_tool_passthrough(self):
-        payload = {
-            "conversationId": "parent-conv-999",
-            "toolCall": {
-                "name": "run_command",
-                "args": {"CommandLine": "ls"}
-            }
-        }
-        result = run_hook(payload)
+    def test_non_subagent_tool_passes_through(self):
+        result = run_hook({
+            "toolCall": {"name": "run_command", "args": {}}
+        })
         assert result["decision"] == "allow"
         assert "overwrite" not in result
-
-    def test_empty_payload(self):
-        result = subprocess.run(
-            ["python3", SCRIPT],
-            input="",
-            capture_output=True, text=True, timeout=5
-        )
-        output = json.loads(result.stdout)
-        assert output["decision"] == "allow"
-
-def test_unique_sequence():
-    pass

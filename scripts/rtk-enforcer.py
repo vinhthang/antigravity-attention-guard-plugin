@@ -5,22 +5,29 @@ import shutil
 import re
 
 # Commands that benefit from RTK output compression
+# No trailing spaces needed — word boundary matching handles disambiguation
 RTK_COMPATIBLE = [
-    "kubectl", "git", "docker", "docker-compose", "podman",
-    "mvn", "gradle", "./gradlew", "go ", "cargo", "rustc",
+    "kubectl", "git", "docker-compose", "docker", "podman",
+    "mvn", "gradle", "./gradlew", "go", "cargo", "rustc",
     "npm", "npx", "pnpm", "yarn",
-    "pip ", "pip3", "uv ", "ruff", "pytest",
-    "aws", "oci", "gcloud", "az ",
+    "pip3", "pip", "uv", "ruff", "pytest",
+    "aws", "oci", "gcloud", "az",
     "terraform", "tofu",
     "helm", "istioctl",
     "curl", "wget",
     "brew",
-    "lsof", "ps ", "top", "htop",
-    "find ", "rg ", "grep", "ag ",
-    "tree", "ls ",
-    "glab", "gh ",
+    "lsof", "ps", "top", "htop",
+    "find", "rg", "grep", "ag",
+    "tree", "ls",
+    "glab", "gh",
     "make", "cmake",
 ]
+
+# Build regex: sort longest-first to prevent partial matches (docker-compose before docker)
+# Match command followed by whitespace or end-of-string
+_RTK_PATTERN = re.compile(
+    r'^(' + '|'.join(re.escape(cmd) for cmd in sorted(RTK_COMPATIBLE, key=len, reverse=True)) + r')(\s|$)',
+)
 
 
 def split_env_prefix(cmd):
@@ -30,20 +37,18 @@ def split_env_prefix(cmd):
         return match.group(1), match.group(2)
     return "", cmd
 
+
 def should_prepend_rtk(cmd):
     prefix, core_cmd = split_env_prefix(cmd)
     if not core_cmd:
         return False
-    if "| rtk" in cmd:
+    if "| rtk" in cmd or core_cmd.startswith("rtk "):
         return False
-    for allow in RTK_COMPATIBLE:
-        if core_cmd.startswith(allow):
-            return True
-    return False
+    return bool(_RTK_PATTERN.match(core_cmd))
+
 
 def main():
     try:
-        # Skip RTK enforcement if rtk is not installed in the environment
         if shutil.which("rtk") is None:
             print(json.dumps({"decision": "allow"}))
             return
@@ -55,7 +60,6 @@ def main():
 
         data = json.loads(raw_payload)
 
-        # Only enforce RTK on run_command tool calls
         tool_call = data.get("toolCall", {})
         tool_name = tool_call.get("name", "")
         if tool_name != "run_command":
@@ -68,12 +72,10 @@ def main():
             print(json.dumps({"decision": "allow"}))
             return
 
-        # Check if the command should have RTK prepended
         if not should_prepend_rtk(command_line):
             print(json.dumps({"decision": "allow"}))
             return
 
-        # Prepend rtk to the command
         prefix, core_cmd = split_env_prefix(command_line)
         rtk_command = f"{prefix}rtk {core_cmd}"
         print(json.dumps({
