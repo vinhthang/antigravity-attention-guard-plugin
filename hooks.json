@@ -1,5 +1,12 @@
 {
   "attention-guard-plugin": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "/usr/bin/env python3 ./scripts/auto-compact.py",
+        "timeout": 5
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "run_command|replace_file_content|write_to_file|call_mcp_tool",

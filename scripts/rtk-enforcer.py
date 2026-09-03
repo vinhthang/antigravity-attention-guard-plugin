@@ -40,8 +40,8 @@ def should_prepend_rtk(cmd):
 
 def main():
     try:
-        # Skip RTK enforcement if rtk is not installed
-        if not shutil.which("rtk"):
+        # Skip RTK enforcement if rtk is not installed in the environment
+        if shutil.which("rtk") is None:
             print(json.dumps({"decision": "allow"}))
             return
 

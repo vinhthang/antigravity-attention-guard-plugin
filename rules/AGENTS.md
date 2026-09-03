@@ -21,5 +21,7 @@ Enforces the two-phase agent lifecycle, subagent model selection, escalation pro
 
 ### 3. Subagent Communication
 - Required fields: `{"status": "completed|failed", "summary": "..."}`. Add `files_modified`, `test_results`, or `error` as needed.
+### 4. Subagent Termination Cleanup
+- If the Primary Agent manually kills a child subagent using the `manage_subagents` tool, it MUST explicitly handle the parent subagent that is stuck waiting. The Primary Agent must either kill the parent subagent as well, or use `send_message` to notify the parent of the child's termination so the parent can exit cleanly.
 </instructions>
 </rule>
