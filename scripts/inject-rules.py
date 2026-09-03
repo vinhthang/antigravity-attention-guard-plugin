@@ -2,8 +2,6 @@
 import sys
 import json
 import os
-
-
 import time
 
 
@@ -32,9 +30,10 @@ def main():
             args = tool_call.get("args", {})
             subagents = args.get("Subagents", [])
             parent_conv_id = payload.get("conversationId", "unknown")
-            seq = int(time.time() * 1000)
-            for sa in subagents:
-                sa["Prompt"] = sa.get("Prompt", "") + injected + f"\n\n[ANTIGRAVITY_SUBAGENT:{parent_conv_id}:{seq}]"
+            base_seq = int(time.time() * 1000)
+            for i, sa in enumerate(subagents):
+                marker = f"[ANTIGRAVITY_SUBAGENT:{parent_conv_id}:{base_seq + i}]"
+                sa["Prompt"] = sa.get("Prompt", "") + injected + f"\n\n{marker}"
 
             print(json.dumps({
                 "decision": "allow",
