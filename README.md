@@ -66,6 +66,14 @@ pytest tests/ -v
 - **Subagent Models**: Any model with "flash" in the name (e.g., `gemini-3.7-flash-tiered`)
 - **RTK**: Optional. Plugin works without RTK installed.
 
+## Platform Compatibility
+
+| OS | Status | Notes |
+|---|---|---|
+| macOS | ✅ Supported | Primary development platform |
+| Linux | ✅ Supported | `python3` required (standard on modern distros) |
+| Windows | ⚠️ Manual Setup | Replace `/usr/bin/env python3` with `python` in `hooks.json` |
+
 ## License
 
 MIT
