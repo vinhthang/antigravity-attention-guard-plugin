@@ -1,4 +1,4 @@
 {
-  "mode": "warning",
-  "threshold_bytes": 150000
+  "mode": "auto",
+  "threshold_tokens": 135000
 }
