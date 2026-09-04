@@ -1,25 +1,30 @@
 #!/usr/bin/env python3
-import subprocess
 import json
 import os
+import io
 import tempfile
 import pytest
 
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "attention-check.py")
+import sys
+import importlib.util
+
+spec = importlib.util.spec_from_file_location(
+    "attention_check",
+    os.path.join(os.path.dirname(__file__), "../scripts/attention-check.py")
+)
+attention_check_mod = importlib.util.module_from_spec(spec)
+sys.modules["attention_check"] = attention_check_mod
+spec.loader.exec_module(attention_check_mod)
 
 @pytest.fixture(autouse=True)
 def setup_test_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("AGY_APP_DATA_DIR", str(tmp_path))
 
 def run_hook(payload):
-    env = os.environ.copy()
-    result = subprocess.run(
-        ["python3", SCRIPT],
-        input=json.dumps(payload),
-        capture_output=True, text=True, timeout=10,
-        env=env
-    )
-    return json.loads(result.stdout)
+    stdin = io.StringIO(json.dumps(payload))
+    stdout = io.StringIO()
+    attention_check_mod.main(argv=["attention-check.py"], stdin=stdin, stdout=stdout)
+    return json.loads(stdout.getvalue().strip())
 
 def create_transcript(path, entries):
     with open(path, "w") as f:
@@ -77,7 +82,11 @@ class TestStopRejectionLimit:
         conv_id = f"chk-delegated-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
-            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "I used invoke_subagent."}
+            {
+                "source": "MODEL",
+                "type": "PLANNER_RESPONSE",
+                "tool_calls": [{"name": "invoke_subagent", "args": {}}]
+            }
         ])
 
         payload = {

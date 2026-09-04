@@ -37,18 +37,25 @@ def is_artifact_path(target_file, artifact_dir):
     return False
 
 
-def main():
+def main(argv=None, stdin=None, stdout=None):
+    if argv is None: argv = sys.argv
+    if stdin is None: stdin = sys.stdin
+    if stdout is None: stdout = sys.stdout
+
+    def emit(data):
+        stdout.write(json.dumps(data) + "\n")
+
     try:
-        raw_payload = sys.stdin.read()
+        raw_payload = stdin.read()
         if not raw_payload or not raw_payload.strip():
-            print(json.dumps({"decision": "allow"}))
+            emit({"decision": "allow"})
             return
 
         data = json.loads(raw_payload)
 
         # Allow subagents to execute freely
         if is_subagent(data):
-            print(json.dumps({"decision": "allow"}))
+            emit({"decision": "allow"})
             return
 
         # Allow Primary Agent to write artifacts
@@ -59,17 +66,17 @@ def main():
         if target_file and tool_name in ["write_to_file", "replace_file_content", "default_api:write_to_file", "default_api:replace_file_content"]:
             artifact_dir = data.get("artifactDirectoryPath", "")
             if artifact_dir and is_artifact_path(target_file, artifact_dir):
-                print(json.dumps({"decision": "allow"}))
+                emit({"decision": "allow"})
                 return
 
         # Allow Primary Agent to generate images (used for artifacts and UI mockups)
         if tool_name in ["generate_image", "default_api:generate_image"]:
-            print(json.dumps({"decision": "allow"}))
+            emit({"decision": "allow"})
             return
 
         # Allow Primary Agent to run bounded, read-only commands
         if tool_name in ["run_command", "default_api:run_command"]:
-            print(json.dumps({"decision": "deny", "reason": "Attention Dilution Guard: The Primary Agent is forbidden from executing shell commands. You must delegate to a subagent."}))
+            emit({"decision": "deny", "reason": "Attention Dilution Guard: The Primary Agent is forbidden from executing shell commands. You must delegate to a subagent."})
             return
 
         # Allow coordination and basic read tools
@@ -83,35 +90,35 @@ def main():
         }
         
         if tool_name in ALLOWED_TOOLS:
-            print(json.dumps({"decision": "allow"}))
+            emit({"decision": "allow"})
             return
 
         if tool_name in ["call_mcp_tool", "default_api:call_mcp_tool"]:
             mcp_tool_name = args.get("ToolName", "")
             server_name = args.get("ServerName", "")
             if (server_name, mcp_tool_name) in MCP_READ_ALLOWLIST:
-                print(json.dumps({"decision": "allow"}))
+                emit({"decision": "allow"})
                 return
 
-            print(json.dumps({
+            emit({
                 "decision": "deny",
                 "reason": f"Attention Dilution Guard: The Primary Agent is restricted to read-only MCP tools. The tool '{mcp_tool_name}' must be delegated to a subagent."
-            }))
+            })
             return
 
         # Block Primary Agent from direct code execution and file modifications
-        print(json.dumps({
+        emit({
             "decision": "deny",
             "reason": (
                 "Attention Dilution Guard: The Primary Agent is restricted to planning "
                 "and artifact creation. Direct code modification and shell execution must be "
                 "delegated to a subagent."
             )
-        }))
+        })
     except json.JSONDecodeError:
-        print(json.dumps({"decision": "deny"}))
+        emit({"decision": "deny"})
     except Exception:
-        print(json.dumps({"decision": "deny"}))
+        emit({"decision": "deny"})
 
 
 if __name__ == "__main__":

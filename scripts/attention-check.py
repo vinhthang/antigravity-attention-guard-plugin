@@ -14,8 +14,14 @@ def has_delegated(transcript_path):
     try:
         with open(transcript_path, "r", encoding="utf-8") as f:
             for line in f:
-                if "invoke_subagent" in line or "manage_subagents" in line:
-                    return True
+                try:
+                    step = json.loads(line)
+                    if "tool_calls" in step:
+                        for tc in step["tool_calls"]:
+                            if tc.get("name") in ["invoke_subagent", "manage_subagents"]:
+                                return True
+                except json.JSONDecodeError:
+                    pass
     except Exception:
         pass
     return False
@@ -42,19 +48,29 @@ def reset_rejection_count(tracker):
     if os.path.exists(count_file):
         os.remove(count_file)
 
-def main():
+def main(argv=None, stdin=None, stdout=None):
+    if argv is None:
+        argv = sys.argv
+    if stdin is None:
+        stdin = sys.stdin
+    if stdout is None:
+        stdout = sys.stdout
+
+    def emit(data):
+        stdout.write(json.dumps(data) + "\n")
+
     try:
-        payload = json.load(sys.stdin)
+        payload = json.loads(stdin.read())
     except Exception:
-        print(json.dumps({"decision": "allow"}))
+        emit({"decision": "allow"})
         return
 
     if not payload.get("fullyIdle", True):
-        print(json.dumps({"decision": "allow"}))
+        emit({"decision": "allow"})
         return
 
     if is_subagent(payload):
-        print(json.dumps({"decision": "allow"}))
+        emit({"decision": "allow"})
         return
 
     conv_id = payload.get("conversationId", "unknown")
@@ -63,19 +79,19 @@ def main():
 
     if has_delegated(transcript_path):
         reset_rejection_count(tracker)
-        print(json.dumps({"decision": "allow"}))
+        emit({"decision": "allow"})
         return
 
     rejection_count = get_rejection_count(tracker)
     if rejection_count >= MAX_STOP_REJECTIONS:
         reset_rejection_count(tracker)
-        print(json.dumps({"decision": "allow"}))
+        emit({"decision": "allow"})
         return
 
     rejection_count = increment_rejection_count(tracker)
     injected_text = f"Attention Guard Refresh: Remember you are the Primary Agent. Delegate all execution to subagents. (Retry {rejection_count}/{MAX_STOP_REJECTIONS})"
     
-    print(json.dumps({"decision": "continue", "reason": injected_text}))
+    emit({"decision": "continue", "reason": injected_text})
 
 if __name__ == "__main__":
     main()

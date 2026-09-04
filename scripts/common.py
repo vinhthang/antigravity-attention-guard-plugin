@@ -2,6 +2,7 @@ import os
 import json
 import re
 import time
+import fcntl
 
 def get_cache_dir():
     base = os.environ.get("AGY_APP_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".gemini", "antigravity")
@@ -46,18 +47,22 @@ def is_subagent(data):
                         continue
 
                     with open(token_file, "r+") as f:
-                        t_data = json.load(f)
-                        if t_data.get("issuer") == conv_id:
-                            continue
+                        fcntl.flock(f, fcntl.LOCK_EX)
+                        try:
+                            t_data = json.load(f)
+                            if t_data.get("issuer") == conv_id:
+                                continue
 
-                        if t_data.get("recipient") is None:
-                            t_data["recipient"] = conv_id
-                            f.seek(0)
-                            json.dump(t_data, f)
-                            f.truncate()
-                            return True
-                        elif t_data.get("recipient") == conv_id:
-                            return True
+                            if t_data.get("recipient") is None:
+                                t_data["recipient"] = conv_id
+                                f.seek(0)
+                                json.dump(t_data, f)
+                                f.truncate()
+                                return True
+                            elif t_data.get("recipient") == conv_id:
+                                return True
+                        finally:
+                            fcntl.flock(f, fcntl.LOCK_UN)
                 except Exception:
                     pass
     except Exception:

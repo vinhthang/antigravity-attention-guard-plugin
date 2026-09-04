@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-import subprocess
-import json
+import sys
 import os
+import io
+import importlib.util
+import json
 import pytest
 
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "inject-rules.py")
-
+spec = importlib.util.spec_from_file_location(
+    "inject_rules",
+    os.path.join(os.path.dirname(__file__), "../scripts/inject-rules.py")
+)
+inject_mod = importlib.util.module_from_spec(spec)
+sys.modules["inject_rules"] = inject_mod
+spec.loader.exec_module(inject_mod)
 
 @pytest.fixture(autouse=True)
 def setup_test_cache(tmp_path, monkeypatch):
@@ -13,13 +20,10 @@ def setup_test_cache(tmp_path, monkeypatch):
 
 
 def run_hook(payload):
-    result = subprocess.run(
-        ["python3", SCRIPT],
-        input=json.dumps(payload),
-        capture_output=True, text=True, timeout=5,
-        env=os.environ.copy()
-    )
-    return json.loads(result.stdout)
+    stdin = io.StringIO(json.dumps(payload))
+    stdout = io.StringIO()
+    inject_mod.main(argv=["inject-rules.py"], stdin=stdin, stdout=stdout)
+    return json.loads(stdout.getvalue().strip())
 
 
 class TestRuleInjection:

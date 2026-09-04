@@ -6,11 +6,18 @@ import json
 import time
 from common import get_cache_dir
 
-def main():
+def main(argv=None, stdin=None, stdout=None):
+    if argv is None: argv = sys.argv
+    if stdin is None: stdin = sys.stdin
+    if stdout is None: stdout = sys.stdout
+
+    def emit(data):
+        stdout.write(json.dumps(data) + "\n")
+
     try:
-        input_data = sys.stdin.read()
+        input_data = stdin.read()
         if not input_data:
-            print(json.dumps({"decision": "allow"}))
+            emit({"decision": "allow"})
             return
 
         payload = json.loads(input_data)
@@ -44,21 +51,21 @@ def main():
                     with open(token_file, "w") as f:
                         json.dump({"issuer": parent_conv_id, "recipient": None}, f)
                 except Exception:
-                    print(json.dumps({"decision": "deny", "reason": "Attention Guard: Failed to issue cryptographic token to subagent cache."}))
+                    emit({"decision": "deny", "reason": "Attention Guard: Failed to issue cryptographic token to subagent cache."})
                     return
                 sa["Prompt"] = f"[ANTIGRAVITY_TOKEN:{token}]\n\n" + sa.get("Prompt", "") + injected
 
-            print(json.dumps({
+            emit({
                 "decision": "allow",
                 "overwrite": {
                     "Subagents": subagents
                 }
-            }))
+            })
             return
 
-        print(json.dumps({"decision": "allow"}))
+        emit({"decision": "allow"})
     except Exception:
-        print(json.dumps({"decision": "allow"}))
+        emit({"decision": "allow"})
 
 
 if __name__ == "__main__":

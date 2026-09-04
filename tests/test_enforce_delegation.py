@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import sys
 import os
+import io
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../scripts')))
 import importlib.util
 import json
-import subprocess
 import pytest
 from common import is_subagent, get_cache_dir
 
@@ -13,31 +13,31 @@ spec = importlib.util.spec_from_file_location(
     os.path.join(os.path.dirname(__file__), "../scripts/enforce-delegation.py")
 )
 enforce_mod = importlib.util.module_from_spec(spec)
+sys.modules["enforce_delegation"] = enforce_mod
 spec.loader.exec_module(enforce_mod)
+
 MCP_READ_ALLOWLIST = enforce_mod.MCP_READ_ALLOWLIST
 is_artifact_path = enforce_mod.is_artifact_path
-
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "enforce-delegation.py")
-
 
 @pytest.fixture(autouse=True)
 def setup_test_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("AGY_APP_DATA_DIR", str(tmp_path))
 
-
 def run_hook(payload):
-    result = subprocess.run(
-        ["python3", SCRIPT],
-        input=json.dumps(payload),
-        capture_output=True, text=True, timeout=5,
-        env={**os.environ}
-    )
-    return json.loads(result.stdout)
-
+    stdin = io.StringIO(json.dumps(payload))
+    stdout = io.StringIO()
+    enforce_mod.main(argv=["enforce-delegation.py"], stdin=stdin, stdout=stdout)
+    return json.loads(stdout.getvalue().strip())
 
 class TestSubagentDetection:
     def test_primary_agent_blocked(self):
-        result = run_hook({"modelName": "claude-opus-4.6", "toolCall": {"args": {"TargetFile": "/some/code.py"}}})
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "run_command",
+                "args": {"CommandLine": "rm -rf /"}
+            }
+        })
         assert result["decision"] == "deny"
 
     def test_subagent_with_token_allowed(self, tmp_path):
