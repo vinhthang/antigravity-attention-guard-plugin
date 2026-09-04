@@ -1,6 +1,6 @@
 # Antigravity Attention Guard Plugin
 
-> A deterministic lifecycle plugin for [Google Antigravity](https://antigravity.google) that prevents Attention Dilution in long-running AI agent sessions, enforcing strict agent safety, optimal LLM context window management, and robust subagent orchestration for complex agentic workflows.
+> Experimental/beta workflow guard that encourages two-phase delegation and periodically reinforces rules.
 
 **Keywords**: Google Antigravity plugins, LLM context window management, agent safety, agentic workflows, subagent orchestration, antigravity, antigravity-plugin, ai-agent, attention-dilution, context-window, llm-governance, agent-delegation, subagent, lifecycle-hooks, rtk, token-optimization
 
