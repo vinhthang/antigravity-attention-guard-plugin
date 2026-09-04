@@ -176,12 +176,12 @@ class TestPrimarySafeCommands:
         })
         assert result["decision"] == "allow"
 
-    def test_rtk_prefixed_allowed(self):
+    def test_rtk_prefixed_blocked(self):
         result = run_hook({
             "modelName": "claude-opus-4.6",
             "toolCall": {"name": "run_command", "args": {"CommandLine": "rtk kubectl get pods"}}
         })
-        assert result["decision"] == "allow"
+        assert result["decision"] == "deny"
 
     def test_safe_with_env_vars(self):
         result = run_hook({
