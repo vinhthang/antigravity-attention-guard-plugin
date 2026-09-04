@@ -6,51 +6,7 @@ import json
 import time
 from common import is_subagent, get_cache_dir
 
-MAX_STOP_REJECTIONS = 3
-MAX_INJECTION_BYTES = 16384
-
-
-def find_rules(workspace_paths):
-    """Discover applicable rule files only (no skills).
-
-    Loads: plugin core rules, workspace rules, global always-on rules.
-    Excludes: skills (they use progressive disclosure and shouldn't be bulk-injected).
-    """
-    plugin_rules_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "rules"))
-    rules = []
-
-    # 1. Plugin's own rules
-    if os.path.exists(plugin_rules_dir):
-        for f in sorted(os.listdir(plugin_rules_dir)):
-            if f.endswith(".md"):
-                rules.append(os.path.join(plugin_rules_dir, f))
-
-    # 2. Workspace-level instructions
-    for wp in workspace_paths:
-        if not wp or not os.path.exists(wp):
-            continue
-        for name in ["GEMINI.md", "AGENTS.md"]:
-            path = os.path.join(wp, name)
-            if os.path.exists(path):
-                rules.append(path)
-        agents_dir = os.path.join(wp, ".agents", "rules")
-        if os.path.exists(agents_dir):
-            for root, _, files in os.walk(agents_dir):
-                for f in sorted(files):
-                    if f.endswith(".md"):
-                        rules.append(os.path.join(root, f))
-
-    # 3. Global rules (NOT skills — skills use progressive disclosure)
-    global_rules_dir = os.path.expanduser("~/.gemini/config/rules")
-    if os.path.exists(global_rules_dir):
-        for root, _, files in os.walk(global_rules_dir):
-            for f in sorted(files):
-                if f.endswith(".md"):
-                    rules.append(os.path.join(root, f))
-
-    # Deduplicate while preserving order
-    seen = set()
-    return [r for r in rules if not (r in seen or seen.add(r))]
+MAX_STOP_REJECTIONS = 2
 
 
 def get_last_model_content(transcript_path):
@@ -153,38 +109,9 @@ def main():
             print(json.dumps({"decision": "allow"}))
             return
 
-        increment_rejection_count(tracker)
+        rejection_count = increment_rejection_count(tracker)
 
-        workspace_paths = payload.get("workspacePaths", [])
-        rules_to_read = find_rules(workspace_paths)
-
-        rule_contents = []
-        for rule_path in rules_to_read:
-            try:
-                with open(rule_path, "r") as rf:
-                    content = rf.read()
-                rule_contents.append(f"=== {os.path.basename(rule_path)} ===\n{content}")
-            except Exception:
-                rule_contents.append(f"=== {os.path.basename(rule_path)} === (could not read)")
-
-        base_msg = (
-            "Your response is missing 'Summary of skills used:'. "
-            "(If you only answered a conversational question, you may include 'No skills used' instead.)\n"
-            "The following rules have been reintroduced into your context. "
-            "Review them and include the summary in your response.\n\n"
-        )
-
-        injected_text = base_msg
-        current_bytes = len(injected_text.encode("utf-8"))
-
-        for content in rule_contents:
-            rule_bytes = len((content + "\n\n").encode("utf-8"))
-            if current_bytes + rule_bytes > MAX_INJECTION_BYTES:
-                if "[... rule omitted" not in injected_text:
-                    injected_text += "\n\n[... rule omitted to prevent context overflow ...]"
-                continue
-            injected_text += content + "\n\n"
-            current_bytes += rule_bytes
+        injected_text = f"Attention Guard Watchdog: Your response is missing the mandatory 'Summary of skills used:' section. Please explicitly summarize the tools you invoked, or state 'No skills used' if none were required. (Retry {rejection_count}/{MAX_STOP_REJECTIONS})"
 
         print(json.dumps({"decision": "continue", "reason": injected_text}))
     else:

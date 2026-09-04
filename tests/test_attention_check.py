@@ -73,7 +73,7 @@ class TestStopRejectionLimit:
             "workspacePaths": []
         }
 
-        for i in range(3):
+        for i in range(2):
             result = run_hook(payload)
             assert result.get("decision") == "continue", f"Rejection {i+1} should block"
 
@@ -112,82 +112,5 @@ class TestSkillsSummaryDetection:
         })
         assert result == {"decision": "allow"}
 
-
-class TestContentCap:
-    def test_injection_is_capped(self, tmp_path):
-        conv_id = f"chk-cap-{os.getpid()}"
-        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
-        create_transcript(str(transcript), [
-            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "No summary here." + " padding" * 30}
-        ])
-        result = run_hook({
-            "fullyIdle": True,
-            "modelName": "claude-opus-4.6",
-            "conversationId": conv_id,
-            "transcriptPath": str(transcript),
-            "workspacePaths": []
-        })
-        assert result.get("decision") == "continue"
-        reason = result.get("reason", "")
-        # Reason should exist and be capped
-        assert len(reason.encode("utf-8")) <= 16384 + 200  # Allow some buffer for truncation notice
-
-    def test_injection_is_capped_with_many_rules(self, tmp_path, monkeypatch):
-        # Create a fake plugin rules directory with many rules
-        plugin_rules_dir = tmp_path / "rules"
-        plugin_rules_dir.mkdir()
-        for i in range(100):
-            (plugin_rules_dir / f"rule_{i}.md").write_text("a" * 1000)
-
-        # Put rules in workspace path
-        workspace_dir = tmp_path / "workspace"
-        workspace_dir.mkdir()
-        agents_rules_dir = workspace_dir / ".agents" / "rules"
-        agents_rules_dir.mkdir(parents=True)
-
-        for i in range(50):
-            (agents_rules_dir / f"rule_{i}.md").write_text("a" * 1000)
-
-        conv_id = f"chk-cap-many-{os.getpid()}"
-        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
-        create_transcript(str(transcript), [
-            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "No summary here." + " padding" * 30}
-        ])
-
-        result = run_hook({
-            "fullyIdle": True,
-            "modelName": "claude-opus-4.6",
-            "conversationId": conv_id,
-            "transcriptPath": str(transcript),
-            "workspacePaths": [str(workspace_dir)]
-        })
-
-        assert result.get("decision") == "continue"
-        reason = result.get("reason", "")
-        # Reason should exist and be capped
-        assert len(reason.encode("utf-8")) <= 16384 + 200  # Allow some buffer for truncation notice
-
-
-class TestSelectiveRuleRefresh:
-    def test_no_skills_injected(self, tmp_path):
-        """Skills should NOT be loaded - only rules."""
-        conv_id = f"chk-norules-{os.getpid()}"
-        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
-        create_transcript(str(transcript), [
-            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "No summary here." + " padding" * 30}
-        ])
-        result = run_hook({
-            "fullyIdle": True,
-            "modelName": "claude-opus-4.6",
-            "conversationId": conv_id,
-            "transcriptPath": str(transcript),
-            "workspacePaths": []
-        })
-        assert result.get("decision") == "continue"
-        reason = result.get("reason", "")
-        # Should NOT contain skill-related content
-        assert "SKILL.md" not in reason
-        # Should contain honest messaging
-        assert "reintroduced" in reason.lower() or "rules" in reason.lower()
 
 
