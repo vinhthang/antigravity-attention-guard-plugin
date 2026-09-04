@@ -8,44 +8,17 @@ from common import is_subagent, get_cache_dir
 
 MAX_STOP_REJECTIONS = 2
 
-
-def get_last_model_content(transcript_path):
-    """Efficiently find the last PLANNER_RESPONSE by reading the file in reverse chunks."""
+def has_delegated(transcript_path):
     if not transcript_path or not os.path.exists(transcript_path):
-        return None
+        return False
     try:
-        with open(transcript_path, "rb") as f:
-            f.seek(0, os.SEEK_END)
-            pos = f.tell()
-            remainder = b""
-            while pos > 0:
-                read_size = min(8192, pos)
-                pos -= read_size
-                f.seek(pos)
-                chunk = f.read(read_size)
-                data = chunk + remainder
-                lines = data.split(b"\n")
-                remainder = lines[0]
-                for line in reversed(lines[1:]):
-                    if not line.strip():
-                        continue
-                    try:
-                        record = json.loads(line.decode("utf-8"))
-                        if record.get("source") == "MODEL" and record.get("type") == "PLANNER_RESPONSE":
-                            return record.get("content", "")
-                    except Exception:
-                        continue
-            if remainder.strip():
-                try:
-                    record = json.loads(remainder.decode("utf-8"))
-                    if record.get("source") == "MODEL" and record.get("type") == "PLANNER_RESPONSE":
-                        return record.get("content", "")
-                except Exception:
-                    pass
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if "invoke_subagent" in line or "manage_subagents" in line:
+                    return True
     except Exception:
-        return None
-    return None
-
+        pass
+    return False
 
 def get_rejection_count(tracker):
     count_file = tracker + "_stop_count"
@@ -57,7 +30,6 @@ def get_rejection_count(tracker):
             pass
     return 0
 
-
 def increment_rejection_count(tracker):
     count_file = tracker + "_stop_count"
     count = get_rejection_count(tracker) + 1
@@ -65,12 +37,10 @@ def increment_rejection_count(tracker):
         f.write(str(count))
     return count
 
-
 def reset_rejection_count(tracker):
     count_file = tracker + "_stop_count"
     if os.path.exists(count_file):
         os.remove(count_file)
-
 
 def main():
     try:
@@ -79,23 +49,20 @@ def main():
         print(json.dumps({"decision": "allow"}))
         return
 
-    # Skip if agent is waiting for subagents
     if not payload.get("fullyIdle", True):
         print(json.dumps({"decision": "allow"}))
         return
 
-    # Skip for subagents
     if is_subagent(payload):
         print(json.dumps({"decision": "allow"}))
         return
 
-    # Get last model response efficiently (reverse scan)
     conv_id = payload.get("conversationId", "unknown")
     tracker = os.path.join(get_cache_dir(), f"reject_count_{conv_id}")
     transcript_path = payload.get("transcriptPath", "")
-    last_model_content = get_last_model_content(transcript_path)
 
-    if last_model_content is None:
+    if has_delegated(transcript_path):
+        reset_rejection_count(tracker)
         print(json.dumps({"decision": "allow"}))
         return
 
@@ -106,11 +73,9 @@ def main():
         return
 
     rejection_count = increment_rejection_count(tracker)
-
     injected_text = f"Attention Guard Refresh: Remember you are the Primary Agent. Delegate all execution to subagents. (Retry {rejection_count}/{MAX_STOP_REJECTIONS})"
-
+    
     print(json.dumps({"decision": "continue", "reason": injected_text}))
-
 
 if __name__ == "__main__":
     main()

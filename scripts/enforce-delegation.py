@@ -56,30 +56,37 @@ def main():
         tool_name = tool_call.get("name", "")
         args = tool_call.get("args", {})
         target_file = args.get("TargetFile", "")
-        if target_file and tool_name in ["write_to_file", "replace_file_content"]:
+        if target_file and tool_name in ["write_to_file", "replace_file_content", "default_api:write_to_file", "default_api:replace_file_content"]:
             artifact_dir = data.get("artifactDirectoryPath", "")
             if artifact_dir and is_artifact_path(target_file, artifact_dir):
                 print(json.dumps({"decision": "allow"}))
                 return
 
         # Allow Primary Agent to generate images (used for artifacts and UI mockups)
-        if tool_name == "generate_image":
+        if tool_name in ["generate_image", "default_api:generate_image"]:
             print(json.dumps({"decision": "allow"}))
             return
 
         # Allow Primary Agent to run bounded, read-only commands
-        if tool_name == "run_command":
+        if tool_name in ["run_command", "default_api:run_command"]:
             print(json.dumps({"decision": "deny", "reason": "Attention Dilution Guard: The Primary Agent is forbidden from executing shell commands. You must delegate to a subagent."}))
             return
 
-        # Enforce MCP Tool Allowlist for Primary Agent
-
-        # Allow read-only standard tools
-        if tool_name in ["view_file", "grep_search", "list_dir", "find_by_name", "search_web", "read_url_content", "default_api:view_file", "default_api:grep_search", "default_api:list_dir", "default_api:find_by_name", "default_api:search_web", "default_api:read_url_content"]:
+        # Allow coordination and basic read tools
+        ALLOWED_TOOLS = {
+            "view_file", "grep_search", "list_dir", "find_by_name", "search_web", "read_url_content",
+            "default_api:view_file", "default_api:grep_search", "default_api:list_dir", "default_api:find_by_name", "default_api:search_web", "default_api:read_url_content",
+            "invoke_subagent", "manage_subagents", "send_message", "manage_task", "schedule",
+            "ask_question", "ask_permission", "list_resources", "read_resource",
+            "default_api:invoke_subagent", "default_api:manage_subagents", "default_api:send_message", "default_api:manage_task", "default_api:schedule",
+            "default_api:ask_question", "default_api:ask_permission", "default_api:list_resources", "default_api:read_resource"
+        }
+        
+        if tool_name in ALLOWED_TOOLS:
             print(json.dumps({"decision": "allow"}))
             return
 
-        if tool_name == "call_mcp_tool":
+        if tool_name in ["call_mcp_tool", "default_api:call_mcp_tool"]:
             mcp_tool_name = args.get("ToolName", "")
             server_name = args.get("ServerName", "")
             if (server_name, mcp_tool_name) in MCP_READ_ALLOWLIST:

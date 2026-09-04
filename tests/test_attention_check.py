@@ -7,11 +7,9 @@ import pytest
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "attention-check.py")
 
-
 @pytest.fixture(autouse=True)
 def setup_test_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("AGY_APP_DATA_DIR", str(tmp_path))
-
 
 def run_hook(payload):
     env = os.environ.copy()
@@ -23,17 +21,13 @@ def run_hook(payload):
     )
     return json.loads(result.stdout)
 
-
 def create_transcript(path, entries):
     with open(path, "w") as f:
         for entry in entries:
             f.write(json.dumps(entry) + "\n")
 
-
 class TestSubagentSkip:
-
     def test_subagent_with_token_skipped(self, tmp_path):
-        """Token in USER_INPUT should be detected and validated."""
         cache_dir = os.path.join(str(tmp_path), "cache")
         os.makedirs(cache_dir, exist_ok=True)
         token_file = os.path.join(cache_dir, "agy_issued_token_abc-123")
@@ -56,13 +50,12 @@ class TestSubagentSkip:
         result = run_hook({"fullyIdle": False, "modelName": "claude-opus-4.6", "conversationId": "chk-2"})
         assert result == {"decision": "allow"}
 
-
 class TestStopRejectionLimit:
     def test_max_rejections_then_allow(self, tmp_path):
         conv_id = f"chk-limit-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
-            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "I did some work but no summary." + " padding" * 30}
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "I did some work but did not delegate."}
         ])
 
         payload = {
@@ -80,4 +73,21 @@ class TestStopRejectionLimit:
         result = run_hook(payload)
         assert result == {"decision": "allow"}, "Should allow after max rejections"
 
+    def test_allow_if_delegated(self, tmp_path):
+        conv_id = f"chk-delegated-{os.getpid()}"
+        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
+        create_transcript(str(transcript), [
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "I used invoke_subagent."}
+        ])
+
+        payload = {
+            "fullyIdle": True,
+            "modelName": "claude-opus-4.6",
+            "conversationId": conv_id,
+            "transcriptPath": str(transcript),
+            "workspacePaths": []
+        }
+
+        result = run_hook(payload)
+        assert result == {"decision": "allow"}
 
