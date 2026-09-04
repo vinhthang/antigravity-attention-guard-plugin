@@ -8,7 +8,7 @@
 
 | Hook | Script | Purpose |
 |---|---|---|
-| PreToolUse | `enforce-delegation.py` | Blocks Primary Agent from code modification, mutating shell execution (safe reads like git status and grep are allowed), and MCP write tools. Forces delegation to subagents. |
+| PreToolUse | `enforce-delegation.py` | Blocks Primary Agent from code modification, shell execution, and MCP write tools. Forces delegation to subagents. |
 | PreToolUse | `rtk-enforcer.py` | Auto-prepends `rtk` to subagent commands for 60-95% output Context Hygiene. Gracefully skips if RTK is not installed. |
 | PreToolUse | `inject-rules.py` | Dynamically injects robust subagent detection markers and liveness tracking rules into subagent prompts. |
 | Stop | `attention-check.py` | Verifies agent output quality. Forces re-reading of all project and global rules if the agent forgets to summarize its work. Max 3 retries to prevent infinite loops. |

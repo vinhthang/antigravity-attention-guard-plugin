@@ -33,7 +33,7 @@ def is_artifact_path(target_file, artifact_dir):
     norm_target = os.path.realpath(os.path.abspath(target_file))
     if artifact_dir:
         norm_artifact = os.path.realpath(os.path.abspath(artifact_dir))
-        if norm_target.startswith(norm_artifact + os.sep) or norm_target == norm_artifact:
+        if os.path.commonpath([norm_target, norm_artifact]) == norm_artifact:
             return True
     return False
 
