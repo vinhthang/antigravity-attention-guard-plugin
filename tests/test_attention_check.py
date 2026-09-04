@@ -50,11 +50,11 @@ class TestSubagentSkip:
             "conversationId": "chk-3",
             "transcriptPath": str(transcript)
         })
-        assert result == {}
+        assert result == {"decision": "allow"}
 
     def test_not_fully_idle_skipped(self):
         result = run_hook({"fullyIdle": False, "modelName": "claude-opus-4.6", "conversationId": "chk-2"})
-        assert result == {}
+        assert result == {"decision": "allow"}
 
 
 class TestStopRejectionLimit:
@@ -78,7 +78,7 @@ class TestStopRejectionLimit:
             assert result.get("decision") == "continue", f"Rejection {i+1} should block"
 
         result = run_hook(payload)
-        assert result == {}, "Should allow after max rejections"
+        assert result == {"decision": "allow"}, "Should allow after max rejections"
 
 
 class TestSkillsSummaryDetection:
@@ -95,7 +95,7 @@ class TestSkillsSummaryDetection:
             "transcriptPath": str(transcript),
             "workspacePaths": []
         })
-        assert result == {}
+        assert result == {"decision": "allow"}
 
     def test_summary_case_insensitive(self, tmp_path):
         conv_id = f"chk-case-{os.getpid()}"
@@ -110,7 +110,7 @@ class TestSkillsSummaryDetection:
             "transcriptPath": str(transcript),
             "workspacePaths": []
         })
-        assert result == {}
+        assert result == {"decision": "allow"}
 
 
 class TestContentCap:
@@ -169,4 +169,4 @@ class TestConversationalBypass:
             "transcriptPath": str(transcript),
             "workspacePaths": []
         })
-        assert result == {}
+        assert result == {"decision": "allow"}

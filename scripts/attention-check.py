@@ -12,7 +12,7 @@ MAX_INJECTION_BYTES = 16384
 
 def find_rules(workspace_paths):
     """Discover applicable rule files only (no skills).
-    
+
     Loads: plugin core rules, workspace rules, global always-on rules.
     Excludes: skills (they use progressive disclosure and shouldn't be bulk-injected).
     """
@@ -120,17 +120,17 @@ def main():
     try:
         payload = json.load(sys.stdin)
     except Exception:
-        print(json.dumps({}))
+        print(json.dumps({"decision": "allow"}))
         return
 
     # Skip if agent is waiting for subagents
     if not payload.get("fullyIdle", True):
-        print(json.dumps({}))
+        print(json.dumps({"decision": "allow"}))
         return
 
     # Skip for subagents
     if is_subagent(payload):
-        print(json.dumps({}))
+        print(json.dumps({"decision": "allow"}))
         return
 
     # Get last model response efficiently (reverse scan)
@@ -140,22 +140,22 @@ def main():
     last_model_content = get_last_model_content(transcript_path)
 
     if last_model_content is None:
-        print(json.dumps({}))
+        print(json.dumps({"decision": "allow"}))
         return
 
     lower_content = last_model_content.lower()
     has_summary = "summary of skills used:" in lower_content or "no skills used" in lower_content
-    
+
     if not has_summary:
         # Bypass for short conversational responses
         if len(last_model_content.strip()) < 150:
             reset_rejection_count(tracker)
-            print(json.dumps({}))
+            print(json.dumps({"decision": "allow"}))
             return
         rejection_count = get_rejection_count(tracker)
         if rejection_count >= MAX_STOP_REJECTIONS:
             reset_rejection_count(tracker)
-            print(json.dumps({}))
+            print(json.dumps({"decision": "allow"}))
             return
 
         increment_rejection_count(tracker)
@@ -182,11 +182,11 @@ def main():
         # Cap injection to prevent context overflow
         if len(injected_text.encode("utf-8")) > MAX_INJECTION_BYTES:
             injected_text = injected_text[:MAX_INJECTION_BYTES] + "\n\n[... truncated to prevent context overflow ...]"
-        
+
         print(json.dumps({"decision": "continue", "reason": injected_text}))
     else:
         reset_rejection_count(tracker)
-        print(json.dumps({}))
+        print(json.dumps({"decision": "allow"}))
 
 
 if __name__ == "__main__":

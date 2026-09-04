@@ -8,8 +8,8 @@
 
 | Hook | Script | Purpose |
 |---|---|---|
-| PreToolUse | `enforce-delegation.py` | Blocks Primary Agent from code modification, shell execution, and MCP write tools. Forces delegation to subagents. |
-| PreToolUse | `rtk-enforcer.py` | Auto-prepends `rtk` to subagent commands for 60-95% output token compression. Gracefully skips if RTK is not installed. |
+| PreToolUse | `enforce-delegation.py` | Blocks Primary Agent from code modification, mutating shell execution (safe reads like git status and grep are allowed), and MCP write tools. Forces delegation to subagents. |
+| PreToolUse | `rtk-enforcer.py` | Auto-prepends `rtk` to subagent commands for 60-95% output Context Hygiene. Gracefully skips if RTK is not installed. |
 | PreToolUse | `inject-rules.py` | Dynamically injects robust subagent detection markers and liveness tracking rules into subagent prompts. |
 | Stop | `attention-check.py` | Verifies agent output quality. Forces re-reading of all project and global rules if the agent forgets to summarize its work. Max 3 retries to prevent infinite loops. |
 
@@ -48,9 +48,13 @@ The plugin automatically scans `~/.gemini/antigravity/mcp/` to discover installe
 
 If [RTK (Rust Token Killer)](https://github.com/vinhthang/rtk) is installed, the plugin automatically prepends `rtk` to subagent commands to compress output by 60-95%. The intelligent regex accurately detects tool commands and prepends `rtk` correctly even when environment variables are prepended (e.g., `FOO=bar cargo build` becomes `FOO=bar rtk cargo build`). Simple commands (`echo`, `mkdir`, `cp`, `chmod`) and already-prefixed commands are skipped.
 
-### Grace Period & Liveness Tracking
+### Liveness Tracking
 
-To ensure optimal agent performance and prevent unnecessary nagging on quick tasks, the Stop hook implements a **120-second grace period** for the Attention Check. Additionally, the plugin enforces a **mandatory 5-minute liveness tracking rule** for all subagents. This ensures the Primary Agent sets a liveness timer when spawning subagents, preventing the Primary Agent from sleeping indefinitely if a subagent hangs.
+The plugin enforces a **mandatory 5-minute liveness tracking rule** for all subagents via injected prompt instructions (`AGENTS.md`) rather than a hard runtime block. This ensures the Primary Agent sets a liveness timer when spawning subagents, preventing the Primary Agent from sleeping indefinitely if a subagent hangs.
+
+### Safe Primary Reads
+
+The Primary Agent can run certain read-only shell commands (like `git status` and `grep`). While these commands are allowed, output could theoretically be unbounded (e.g., `grep` on a massive directory), so the primary agent must still use discretion.
 
 ## Running Tests
 

@@ -16,11 +16,11 @@ def is_subagent(data):
     transcript_path = data.get("transcriptPath", "")
     if not transcript_path or not os.path.exists(transcript_path):
         return False
-        
+
     try:
         with open(transcript_path, "r", encoding="utf-8") as f:
             content = f.read(8192)
-            
+
         match = re.search(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]', content)
         if match:
             token = match.group(1)
@@ -29,5 +29,5 @@ def is_subagent(data):
                 return True
     except Exception:
         pass
-        
+
     return False
