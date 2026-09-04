@@ -16,7 +16,7 @@ def has_delegated(transcript_path):
             for line in f:
                 try:
                     step = json.loads(line)
-                    if "tool_calls" in step:
+                    if step.get("source") == "MODEL" and "tool_calls" in step:
                         for tc in step["tool_calls"]:
                             if tc.get("name") in ["invoke_subagent", "manage_subagents"]:
                                 return True

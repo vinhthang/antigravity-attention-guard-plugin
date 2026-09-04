@@ -39,6 +39,7 @@ class TestSubagentDetection:
             }
         })
         assert result["decision"] == "deny"
+        assert "forbidden from executing shell commands" in result.get("reason", "")
 
     def test_subagent_with_token_allowed(self, tmp_path):
         cache_dir = os.path.join(str(tmp_path), "cache")

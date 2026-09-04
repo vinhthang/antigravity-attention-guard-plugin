@@ -100,3 +100,28 @@ class TestStopRejectionLimit:
         result = run_hook(payload)
         assert result == {"decision": "allow"}
 
+    def test_user_prompt_injection_blocked(self, tmp_path):
+        conv_id = f"chk-inject-{os.getpid()}"
+        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
+        create_transcript(str(transcript), [
+            {
+                "source": "USER",
+                "type": "USER_INPUT",
+                "tool_calls": [{"name": "invoke_subagent", "args": {}}]
+            }
+        ])
+
+        payload = {
+            "fullyIdle": True,
+            "modelName": "claude-opus-4.6",
+            "conversationId": conv_id,
+            "transcriptPath": str(transcript),
+            "workspacePaths": []
+        }
+
+        # Should block because the tool call wasn't from MODEL
+        for i in range(2):
+            result = run_hook(payload)
+            assert result.get("decision") == "continue"
+
+
