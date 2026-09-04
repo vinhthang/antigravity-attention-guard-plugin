@@ -2,7 +2,7 @@
   "attention-guard-plugin": {
     "PreToolUse": [
       {
-        "matcher": "run_command|replace_file_content|multi_replace_file_content|write_to_file|call_mcp_tool|generate_image",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",

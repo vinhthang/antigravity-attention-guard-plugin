@@ -16,7 +16,7 @@ def main():
         payload = json.loads(input_data)
 
         # Read the plugin's own AGENTS.md
-        agents_rule = os.path.join(os.path.dirname(__file__), "..", "rules", "AGENTS.md")
+        agents_rule = os.path.join(os.path.dirname(__file__), "..", "rules", "EXECUTOR.md")
         agents_rule = os.path.abspath(agents_rule)
 
         rules_text = ""
@@ -44,7 +44,8 @@ def main():
                     with open(token_file, "w") as f:
                         json.dump({"issuer": parent_conv_id, "recipient": None}, f)
                 except Exception:
-                    pass
+                    print(json.dumps({"decision": "deny", "reason": "Attention Guard: Failed to issue cryptographic token to subagent cache."}))
+                    return
                 sa["Prompt"] = f"[ANTIGRAVITY_TOKEN:{token}]\n\n" + sa.get("Prompt", "") + injected
 
             print(json.dumps({

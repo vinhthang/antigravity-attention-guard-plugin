@@ -14,6 +14,17 @@ def is_subagent(data):
     Reads only the first 8192 bytes of the transcript to find the token.
     Validates the token against the issued token cache.
     """
+    cache_dir = get_cache_dir()
+    try:
+        now_time = time.time()
+        for fname in os.listdir(cache_dir):
+            if fname.startswith("agy_issued_token_"):
+                fpath = os.path.join(cache_dir, fname)
+                if now_time - os.path.getmtime(fpath) > 86400:
+                    os.remove(fpath)
+    except Exception:
+        pass
+
     transcript_path = data.get("transcriptPath", "")
     if not transcript_path or not os.path.exists(transcript_path):
         return False

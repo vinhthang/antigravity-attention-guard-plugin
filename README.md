@@ -10,7 +10,7 @@
 |---|---|---|
 | PreToolUse | `enforce-delegation.py` | Blocks Primary Agent from code modification, shell execution, and MCP write tools. Forces delegation to subagents. |
 | PreToolUse | `inject-rules.py` | Dynamically injects robust subagent detection markers and liveness tracking rules into subagent prompts. |
-| Stop | `attention-check.py` | Verifies agent output quality. Forces re-reading of all project and global rules if the agent forgets to summarize its work. Max 3 retries to prevent infinite loops. |
+| Stop | `attention-check.py` | Acts as an invariant refresh. Periodically reminds the primary agent of the core rule: Delegate all execution to subagents. Max 2 retries to prevent infinite loops. |
 
 ## Installation
 

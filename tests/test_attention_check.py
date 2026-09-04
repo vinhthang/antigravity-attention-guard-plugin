@@ -81,36 +81,3 @@ class TestStopRejectionLimit:
         assert result == {"decision": "allow"}, "Should allow after max rejections"
 
 
-class TestSkillsSummaryDetection:
-    def test_summary_present_passes(self, tmp_path):
-        conv_id = f"chk-pass-{os.getpid()}"
-        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
-        create_transcript(str(transcript), [
-            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "Done. Summary of skills used: rtk, superpowers."}
-        ])
-        result = run_hook({
-            "fullyIdle": True,
-            "modelName": "claude-opus-4.6",
-            "conversationId": conv_id,
-            "transcriptPath": str(transcript),
-            "workspacePaths": []
-        })
-        assert result == {"decision": "allow"}
-
-    def test_summary_case_insensitive(self, tmp_path):
-        conv_id = f"chk-case-{os.getpid()}"
-        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
-        create_transcript(str(transcript), [
-            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "Done. summary of Skills Used: rtk."}
-        ])
-        result = run_hook({
-            "fullyIdle": True,
-            "modelName": "claude-opus-4.6",
-            "conversationId": conv_id,
-            "transcriptPath": str(transcript),
-            "workspacePaths": []
-        })
-        assert result == {"decision": "allow"}
-
-
-
