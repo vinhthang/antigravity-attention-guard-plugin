@@ -26,6 +26,17 @@ def is_subagent(data):
             token = match.group(1)
             token_file = os.path.join(get_cache_dir(), f"agy_issued_token_{token}")
             if os.path.exists(token_file):
+                # Simple GC: clean up old tokens in the cache dir while we're here
+                try:
+                    import time
+                    now = time.time()
+                    for f in os.listdir(get_cache_dir()):
+                        if f.startswith("agy_issued_token_"):
+                            f_path = os.path.join(get_cache_dir(), f)
+                            if now - os.path.getmtime(f_path) > 86400: # 24 hours
+                                os.remove(f_path)
+                except Exception:
+                    pass
                 return True
     except Exception:
         pass

@@ -35,8 +35,6 @@ PRIMARY_SAFE_COMMANDS = [
     "ls", "tree",
     # System info (tiny output)
     "echo ", "date", "whoami", "pwd", "which ", "type ",
-    # Already compressed
-    "rtk ",
     # Test runners (output compressed by RTK)
     "pytest", "python3 -m pytest",
 ]
@@ -52,7 +50,15 @@ def is_safe_primary_command(command_line):
     core_cmd = match.group(1) if match else command_line
     if not core_cmd:
         return False
-    return bool(_PRIMARY_SAFE_RE.match(core_cmd))
+        
+    core_cmd = core_cmd.strip()
+    if core_cmd.startswith("rtk "):
+        core_cmd = core_cmd[4:].strip()
+        
+    for safe_cmd in PRIMARY_SAFE_COMMANDS:
+        if core_cmd.startswith(safe_cmd):
+            return True
+    return False
 
 
 
@@ -91,12 +97,12 @@ def main():
         tool_call = data.get("toolCall", {})
         tool_name = tool_call.get("name", "")
         args = tool_call.get("args", {})
-        target_file = args.get("TargetFile", "") or args.get("target_file", "") or args.get("path", "")
-        artifact_dir = data.get("artifactDirectoryPath", "")
-
-        if is_artifact_path(target_file, artifact_dir):
-            print(json.dumps({"decision": "allow"}))
-            return
+        target_file = args.get("TargetFile", "")
+        if target_file and tool_name in ["write_to_file", "replace_file_content"]:
+            artifact_dir = data.get("artifactDirectoryPath", "")
+            if artifact_dir and is_artifact_path(target_file, artifact_dir):
+                print(json.dumps({"decision": "allow"}))
+                return
 
         # Allow Primary Agent to generate images (used for artifacts and UI mockups)
         if tool_name == "generate_image":
