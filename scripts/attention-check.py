@@ -167,16 +167,22 @@ def main():
             except Exception:
                 rule_contents.append(f"=== {os.path.basename(rule_path)} === (could not read)")
 
-        injected_text = (
+        base_msg = (
             "Your response is missing 'Summary of skills used:'. "
             "(If you only answered a conversational question, you may include 'No skills used' instead.)\n"
             "The following rules have been reintroduced into your context. "
             "Review them and include the summary in your response.\n\n"
-            + "\n\n".join(rule_contents)
         )
-        # Cap injection to prevent context overflow
-        if len(injected_text.encode("utf-8")) > MAX_INJECTION_BYTES:
-            injected_text = injected_text.encode("utf-8")[:MAX_INJECTION_BYTES].decode("utf-8", "ignore") + "\n\n[... truncated to prevent context overflow ...]"
+        
+        injected_text = base_msg
+        current_bytes = len(injected_text.encode("utf-8"))
+        
+        for content in rule_contents:
+            rule_bytes = len((content + "\n\n").encode("utf-8"))
+            if current_bytes + rule_bytes > MAX_INJECTION_BYTES:
+                injected_text += "\n\n[... remaining rules truncated to prevent context overflow ...]"
+                break
+            injected_text += content + "\n\n"
 
         print(json.dumps({"decision": "continue", "reason": injected_text}))
     else:
