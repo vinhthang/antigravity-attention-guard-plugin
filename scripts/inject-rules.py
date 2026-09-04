@@ -45,7 +45,7 @@ def main():
                         f.write(parent_conv_id)
                 except Exception:
                     pass
-                sa["Prompt"] = sa.get("Prompt", "") + injected + f"\n\n[ANTIGRAVITY_TOKEN:{token}]"
+                sa["Prompt"] = f"[ANTIGRAVITY_TOKEN:{token}]\n\n" + sa.get("Prompt", "") + injected
 
             print(json.dumps({
                 "decision": "allow",

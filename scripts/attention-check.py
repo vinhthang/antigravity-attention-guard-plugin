@@ -143,7 +143,15 @@ def main():
         print(json.dumps({}))
         return
 
-    if "summary of skills used:" not in last_model_content.lower():
+    lower_content = last_model_content.lower()
+    has_summary = "summary of skills used:" in lower_content or "no skills used" in lower_content
+    
+    if not has_summary:
+        # Bypass for short conversational responses
+        if len(last_model_content.strip()) < 150:
+            reset_rejection_count(tracker)
+            print(json.dumps({}))
+            return
         rejection_count = get_rejection_count(tracker)
         if rejection_count >= MAX_STOP_REJECTIONS:
             reset_rejection_count(tracker)
@@ -166,6 +174,7 @@ def main():
 
         injected_text = (
             "Your response is missing 'Summary of skills used:'. "
+            "(If you only answered a conversational question, you may include 'No skills used' instead.)\n"
             "The following rules have been reintroduced into your context. "
             "Review them and include the summary in your response.\n\n"
             + "\n\n".join(rule_contents)

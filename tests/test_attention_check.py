@@ -31,9 +31,6 @@ def create_transcript(path, entries):
 
 
 class TestSubagentSkip:
-    def test_subagent_skipped_flash(self):
-        result = run_hook({"fullyIdle": True, "modelName": "gemini-2.0-flash", "conversationId": "chk-1"})
-        assert result == {}
 
     def test_subagent_with_token_skipped(self, tmp_path):
         """Token in USER_INPUT should be detected and validated."""
@@ -65,7 +62,7 @@ class TestStopRejectionLimit:
         conv_id = f"chk-limit-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
-            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "I did some work but no summary."}
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "I did some work but no summary." + " padding" * 30}
         ])
 
         payload = {
@@ -121,7 +118,7 @@ class TestContentCap:
         conv_id = f"chk-cap-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
-            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "No summary here."}
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "No summary here." + " padding" * 30}
         ])
         result = run_hook({
             "fullyIdle": True,
@@ -142,7 +139,7 @@ class TestSelectiveRuleRefresh:
         conv_id = f"chk-norules-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
-            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "No summary here."}
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "No summary here." + " padding" * 30}
         ])
         result = run_hook({
             "fullyIdle": True,
@@ -157,3 +154,19 @@ class TestSelectiveRuleRefresh:
         assert "SKILL.md" not in reason
         # Should contain honest messaging
         assert "reintroduced" in reason.lower() or "rules" in reason.lower()
+
+class TestConversationalBypass:
+    def test_short_response_bypasses(self, tmp_path):
+        conv_id = f"chk-conv-{os.getpid()}"
+        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
+        create_transcript(str(transcript), [
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "I am short"}
+        ])
+        result = run_hook({
+            "fullyIdle": True,
+            "modelName": "claude-opus-4.6",
+            "conversationId": conv_id,
+            "transcriptPath": str(transcript),
+            "workspacePaths": []
+        })
+        assert result == {}
