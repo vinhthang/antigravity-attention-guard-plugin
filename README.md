@@ -1,6 +1,6 @@
 # Antigravity Attention Guard Plugin
 
-> Experimental/beta workflow guard that encourages two-phase delegation and periodically reinforces rules.
+> **Honest release label**: Experimental/beta workflow guard that encourages two-phase delegation and periodically reinforces rules.
 
 **Keywords**: Google Antigravity plugins, LLM context window management, agent safety, agentic workflows, subagent orchestration, antigravity, antigravity-plugin, ai-agent, attention-dilution, context-window, llm-governance, agent-delegation, subagent, lifecycle-hooks, rtk, token-optimization
 
