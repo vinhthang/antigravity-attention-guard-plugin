@@ -9,59 +9,19 @@ from common import is_subagent, get_cache_dir
 
 
 MCP_READ_ALLOWLIST = {
-    "codegraph_search", "codegraph_context", "codegraph_callers", 
-    "codegraph_callees", "codegraph_node", "codegraph_explore",
-    "codegraph_status", "codegraph_files", "codegraph_impact",
-    "resolve-library-id", "query-docs",
-    "sequentialthinking",
-    "read_file", "read_text_file", "read_media_file", 
-    "read_multiple_files", "list_directory", "list_directory_with_sizes",
-    "directory_tree", "search_files", "get_file_info", "list_allowed_directories",
+    ("codegraph", "codegraph_search"), ("codegraph", "codegraph_context"),
+    ("codegraph", "codegraph_callers"), ("codegraph", "codegraph_callees"),
+    ("codegraph", "codegraph_node"), ("codegraph", "codegraph_explore"),
+    ("codegraph", "codegraph_status"), ("codegraph", "codegraph_files"),
+    ("codegraph", "codegraph_impact"),
+    ("context7", "resolve-library-id"), ("context7", "query-docs"),
+    ("sequential-thinking", "sequentialthinking"),
+    ("server-filesystem", "read_file"), ("server-filesystem", "read_text_file"),
+    ("server-filesystem", "read_media_file"), ("server-filesystem", "read_multiple_files"),
+    ("server-filesystem", "list_directory"), ("server-filesystem", "list_directory_with_sizes"),
+    ("server-filesystem", "directory_tree"), ("server-filesystem", "search_files"),
+    ("server-filesystem", "get_file_info"), ("server-filesystem", "list_allowed_directories")
 }
-
-
-# Read-only commands the primary agent can run directly.
-# These produce bounded output unlikely to cause attention dilution.
-# RTK will further compress output for RTK-compatible commands.
-PRIMARY_SAFE_COMMANDS = [
-    # Version control (read-only)
-    "git status", "git branch", "git log", "git diff", "git show",
-    "git stash list", "git remote", "git tag", "git rev-parse",
-    # Search (bounded by pattern matching)
-    "rg ", "grep ", "ag ", "ack ",
-    # File inspection (bounded output)
-    "wc ", "head ", "tail ", "file ", "stat ",
-    # Directory listing
-    "ls", "tree",
-    # System info (tiny output)
-    "echo ", "date", "whoami", "pwd", "which ", "type ",
-    # Test runners (output compressed by RTK)
-    "pytest", "python3 -m pytest",
-]
-
-_PRIMARY_SAFE_RE = re.compile(
-    r'^(' + '|'.join(re.escape(cmd.rstrip()) for cmd in sorted(PRIMARY_SAFE_COMMANDS, key=len, reverse=True)) + r')(\s|$)',
-)
-
-def is_safe_primary_command(command_line):
-    """Check if a command is safe for the primary agent to run directly."""
-    # Strip env vars, sudo, time, nice prefixes
-    match = re.match(r'^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+|sudo\s+|time\s+|nice\s+)*(.*)', command_line)
-    core_cmd = match.group(1) if match else command_line
-    if not core_cmd:
-        return False
-        
-    core_cmd = core_cmd.strip()
-    if core_cmd.startswith("rtk "):
-        core_cmd = core_cmd[4:].strip()
-        
-    for safe_cmd in PRIMARY_SAFE_COMMANDS:
-        if core_cmd.startswith(safe_cmd):
-            return True
-    return False
-
-
-
 
 
 def is_artifact_path(target_file, artifact_dir):
@@ -75,8 +35,7 @@ def is_artifact_path(target_file, artifact_dir):
         norm_artifact = os.path.realpath(os.path.abspath(artifact_dir))
         if norm_target.startswith(norm_artifact + os.sep) or norm_target == norm_artifact:
             return True
-    # Fallback: require brain/<uuid>/ pattern
-    return bool(re.search(r'/brain/[0-9a-f-]{36}/', norm_target))
+    return False
 
 
 def main():
@@ -111,20 +70,19 @@ def main():
 
         # Allow Primary Agent to run bounded, read-only commands
         if tool_name == "run_command":
-            command_line = args.get("CommandLine", "")
-            if is_safe_primary_command(command_line):
-                print(json.dumps({"decision": "allow"}))
-                return
+            print(json.dumps({"decision": "deny", "reason": "Attention Dilution Guard: The Primary Agent is forbidden from executing shell commands. You must delegate to a subagent."}))
+            return
 
         # Enforce MCP Tool Allowlist for Primary Agent
         if tool_name == "call_mcp_tool":
             mcp_tool_name = args.get("ToolName", "")
-            if mcp_tool_name in MCP_READ_ALLOWLIST:
+            server_name = args.get("ServerName", "")
+            if (server_name, mcp_tool_name) in MCP_READ_ALLOWLIST:
                 print(json.dumps({"decision": "allow"}))
                 return
-            
+
             print(json.dumps({
-                "decision": "deny", 
+                "decision": "deny",
                 "reason": f"Attention Dilution Guard: The Primary Agent is restricted to read-only MCP tools. The tool '{mcp_tool_name}' must be delegated to a subagent."
             }))
             return
@@ -139,9 +97,9 @@ def main():
             )
         }))
     except json.JSONDecodeError:
-        print(json.dumps({"decision": "allow"}))
+        print(json.dumps({"decision": "deny"}))
     except Exception:
-        print(json.dumps({"decision": "allow"}))
+        print(json.dumps({"decision": "deny"}))
 
 
 if __name__ == "__main__":

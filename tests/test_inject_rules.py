@@ -53,12 +53,12 @@ class TestRuleInjection:
         })
         assert result["decision"] == "allow"
         subagents = result["overwrite"]["Subagents"]
-        
+
         import re
         match = re.search(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]', subagents[0]["Prompt"])
         assert match
         token = match.group(1)
-        
+
         cache_dir = os.path.join(str(tmp_path), "cache")
         token_file = os.path.join(cache_dir, f"agy_issued_token_{token}")
         assert os.path.exists(token_file)

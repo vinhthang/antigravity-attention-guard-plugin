@@ -36,13 +36,9 @@ Antigravity instantly applies updates without restart.
 The plugin enforces a strict two-phase lifecycle for safe agentic workflows:
 
 1. **Phase 1 (Primary Agent)**: High-level reasoning, planning, and artifact creation only. No direct code changes.
-2. **Phase 2 (Subagents)**: Spawned to execute code changes, run commands, and validate checks. 
+2. **Phase 2 (Subagents)**: Spawned to execute code changes, run commands, and validate checks.
 
 Thanks to deterministic transcript markers injected into the subagents' prompts, **any** subagent model (`flash`, `pro`, `flash_lite`, `inherit`, etc.) is now fully supported.
-
-### Dynamic MCP Write Tool Discovery
-
-The plugin automatically scans `~/.gemini/antigravity/mcp/` to discover installed MCP servers and their write tools. Any MCP tool starting with a mutating verb (`create`, `write`, `edit`, `push`, `delete`, `move`, `fork`, `update`, etc.) is automatically blocked for the Primary Agent. Results are cached for 5 minutes.
 
 ### RTK Auto-Enforcement
 
@@ -51,10 +47,6 @@ If [RTK (Rust Token Killer)](https://github.com/vinhthang/rtk) is installed, the
 ### Liveness Tracking
 
 The plugin enforces a **mandatory 5-minute liveness tracking rule** for all subagents via injected prompt instructions (`AGENTS.md`) rather than a hard runtime block. This ensures the Primary Agent sets a liveness timer when spawning subagents, preventing the Primary Agent from sleeping indefinitely if a subagent hangs.
-
-### Safe Primary Reads
-
-The Primary Agent can run certain read-only shell commands (like `git status` and `grep`). While these commands are allowed, output could theoretically be unbounded (e.g., `grep` on a massive directory), so the primary agent must still use discretion.
 
 ## Running Tests
 

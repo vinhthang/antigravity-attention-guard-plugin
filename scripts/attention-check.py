@@ -147,11 +147,6 @@ def main():
     has_summary = "summary of skills used:" in lower_content or "no skills used" in lower_content
 
     if not has_summary:
-        # Bypass for short conversational responses
-        if len(last_model_content.strip()) < 150:
-            reset_rejection_count(tracker)
-            print(json.dumps({"decision": "allow"}))
-            return
         rejection_count = get_rejection_count(tracker)
         if rejection_count >= MAX_STOP_REJECTIONS:
             reset_rejection_count(tracker)
@@ -181,7 +176,7 @@ def main():
         )
         # Cap injection to prevent context overflow
         if len(injected_text.encode("utf-8")) > MAX_INJECTION_BYTES:
-            injected_text = injected_text[:MAX_INJECTION_BYTES] + "\n\n[... truncated to prevent context overflow ...]"
+            injected_text = injected_text.encode("utf-8")[:MAX_INJECTION_BYTES].decode("utf-8", "ignore") + "\n\n[... truncated to prevent context overflow ...]"
 
         print(json.dumps({"decision": "continue", "reason": injected_text}))
     else:

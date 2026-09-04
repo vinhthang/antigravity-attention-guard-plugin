@@ -31,12 +31,12 @@ def main():
             args = tool_call.get("args", {})
             subagents = args.get("Subagents", [])
             parent_conv_id = payload.get("conversationId", "unknown")
-            
+
             import uuid
-            
+
             # Issue a token for each child subagent
             cache_dir = get_cache_dir()
-            
+
             for sa in subagents:
                 token = str(uuid.uuid4())
                 try:

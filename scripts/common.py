@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import time
 
 def get_cache_dir():
     base = os.environ.get("AGY_APP_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".gemini", "antigravity")
@@ -21,23 +22,24 @@ def is_subagent(data):
         with open(transcript_path, "r", encoding="utf-8") as f:
             content = f.read(8192)
 
-        match = re.search(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]', content)
-        if match:
+        conv_id = data.get("conversationId", "unknown")
+        matches = re.finditer(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]', content)
+        now = time.time()
+        for match in matches:
             token = match.group(1)
             token_file = os.path.join(get_cache_dir(), f"agy_issued_token_{token}")
             if os.path.exists(token_file):
-                # Simple GC: clean up old tokens in the cache dir while we're here
                 try:
-                    import time
-                    now = time.time()
-                    for f in os.listdir(get_cache_dir()):
-                        if f.startswith("agy_issued_token_"):
-                            f_path = os.path.join(get_cache_dir(), f)
-                            if now - os.path.getmtime(f_path) > 86400: # 24 hours
-                                os.remove(f_path)
+                    if now - os.path.getmtime(token_file) > 86400:
+                        os.remove(token_file)
+                        continue
+
+                    with open(token_file, "r") as f:
+                        issuer_id = f.read().strip()
+                    if issuer_id != conv_id:
+                        return True
                 except Exception:
                     pass
-                return True
     except Exception:
         pass
 

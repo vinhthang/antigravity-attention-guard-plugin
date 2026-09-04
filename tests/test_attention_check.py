@@ -39,7 +39,7 @@ class TestSubagentSkip:
         token_file = os.path.join(cache_dir, "agy_issued_token_abc-123")
         with open(token_file, "w") as f:
             f.write("parent")
-            
+
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(
             '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do task\\n\\n[ANTIGRAVITY_TOKEN:abc-123]"}\n'
@@ -155,18 +155,4 @@ class TestSelectiveRuleRefresh:
         # Should contain honest messaging
         assert "reintroduced" in reason.lower() or "rules" in reason.lower()
 
-class TestConversationalBypass:
-    def test_short_response_bypasses(self, tmp_path):
-        conv_id = f"chk-conv-{os.getpid()}"
-        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
-        create_transcript(str(transcript), [
-            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "I am short"}
-        ])
-        result = run_hook({
-            "fullyIdle": True,
-            "modelName": "claude-opus-4.6",
-            "conversationId": conv_id,
-            "transcriptPath": str(transcript),
-            "workspacePaths": []
-        })
-        assert result == {"decision": "allow"}
+
