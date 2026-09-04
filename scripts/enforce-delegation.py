@@ -55,6 +55,11 @@ def main(argv=None, stdin=None, stdout=None):
 
         # Allow subagents to execute freely
         if is_subagent(data):
+            tool_call = data.get("toolCall", {})
+            tool_name = tool_call.get("name", "")
+            if tool_name in ["invoke_subagent", "manage_subagents", "default_api:invoke_subagent", "default_api:manage_subagents"]:
+                emit({"decision": "deny", "reason": "Attention Dilution Guard: Subagents are forbidden from delegating tasks further. Do not invoke or manage subagents."})
+                return
             emit({"decision": "allow"})
             return
 

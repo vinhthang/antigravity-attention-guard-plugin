@@ -12,16 +12,20 @@ def has_delegated(transcript_path):
     if not transcript_path or not os.path.exists(transcript_path):
         return False
     try:
+        found_delegation = False
         with open(transcript_path, "r", encoding="utf-8") as f:
             for line in f:
                 try:
                     step = json.loads(line)
+                    if step.get("source") == "USER":
+                        found_delegation = False
                     if step.get("source") == "MODEL" and "tool_calls" in step:
                         for tc in step["tool_calls"]:
                             if tc.get("name") in ["invoke_subagent", "manage_subagents"]:
-                                return True
+                                found_delegation = True
                 except json.JSONDecodeError:
                     pass
+        return found_delegation
     except Exception:
         pass
     return False

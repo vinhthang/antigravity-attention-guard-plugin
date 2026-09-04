@@ -45,13 +45,19 @@ The plugin enforces a **mandatory 5-minute liveness tracking rule** for all suba
 
 ## Running Tests
 
+Install the testing dependencies first:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 ```bash
 pytest tests/ -v
 ```
 
 ## Compatibility
 
-- **Platforms**: macOS, Linux, Windows (Python 3.6+)
+- **Platforms**: macOS, Linux (Python 3.6+)
 - **Primary Agent Models**: Any model (e.g., Gemini, Claude, GPT)
 - **Subagent Models**: **ALL** subagent models are supported (`flash`, `pro`, `inherit`, etc.)
 
@@ -61,7 +67,6 @@ pytest tests/ -v
 |---|---|---|
 | macOS | ✅ Supported | Primary development platform |
 | Linux | ✅ Supported | `python3` required (standard on modern distros) |
-| Windows | ⚠️ Manual Setup | Replace `/usr/bin/env python3` with `python` in `hooks.json` |
 
 ## License
 
