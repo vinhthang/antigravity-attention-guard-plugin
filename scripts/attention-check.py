@@ -183,6 +183,7 @@ def main():
                 injected_text += "\n\n[... remaining rules truncated to prevent context overflow ...]"
                 break
             injected_text += content + "\n\n"
+            current_bytes += rule_bytes
 
         print(json.dumps({"decision": "continue", "reason": injected_text}))
     else:
