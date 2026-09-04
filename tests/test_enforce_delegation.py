@@ -90,3 +90,21 @@ class TestGenerateImageAllowed:
             "toolCall": {"name": "generate_image", "args": {"ImageName": "test_image", "Prompt": "A logo"}}
         })
         assert result["decision"] == "allow"
+
+    def test_subagent_blocked_from_delegating(self, tmp_path):
+        cache_dir = os.path.join(str(tmp_path), "cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        token_file = os.path.join(cache_dir, "agy_issued_token_1234-abcd")
+        with open(token_file, "w") as f:
+            json.dump({"issuer": "parent", "recipient": None}, f)
+
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text('{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do the task\\n\\n[ANTIGRAVITY_TOKEN:1234-abcd]"}\n')
+
+        payload = {
+            "transcriptPath": str(transcript),
+            "toolCall": {"name": "invoke_subagent"}
+        }
+
+        result = run_hook(payload)
+        assert result.get("decision") == "deny"

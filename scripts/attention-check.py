@@ -17,7 +17,7 @@ def has_delegated(transcript_path):
             for line in f:
                 try:
                     step = json.loads(line)
-                    if step.get("source") == "USER":
+                    if str(step.get("source", "")).startswith("USER"):
                         found_delegation = False
                     if step.get("source") == "MODEL" and "tool_calls" in step:
                         for tc in step["tool_calls"]:
