@@ -76,6 +76,22 @@ class TestSubagentDetection:
         data = {"conversationId": "conv-subagent-456", "transcriptPath": str(transcript)}
         assert is_subagent(data) is True
 
+    def test_multi_level_delegation_subagent_takes_precedence(self, tmp_path):
+        """A middle-tier agent (has marker AND has primary cache) should be treated as subagent."""
+        cache_dir = os.path.join(str(tmp_path), "cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        # Create primary cache file for this conversation
+        primary_file = os.path.join(cache_dir, "agy_primary_mid-tier-conv")
+        with open(primary_file, "w") as f:
+            f.write("1234567890")
+        # Create transcript with marker
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do task\\n\\n[ANTIGRAVITY_SUBAGENT:parent:123]"}\n'
+        )
+        data = {"conversationId": "mid-tier-conv", "transcriptPath": str(transcript)}
+        assert is_subagent(data) is True  # Marker takes precedence over primary cache
+
     def test_flash_with_transcript_no_marker_blocked(self, tmp_path):
         """Flash model WITH transcript but no marker should be blocked."""
         transcript = tmp_path / "transcript.jsonl"
@@ -119,5 +135,105 @@ class TestGenerateImageAllowed:
         result = run_hook({
             "modelName": "claude-opus-4.6",
             "toolCall": {"name": "generate_image", "args": {"ImageName": "test_image", "Prompt": "A logo"}}
+        })
+        assert result["decision"] == "allow"
+
+
+class TestPrimarySafeCommands:
+    def test_git_status_allowed(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "git status"}}
+        })
+        assert result["decision"] == "allow"
+
+    def test_git_log_allowed(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "git log -n 5 --oneline"}}
+        })
+        assert result["decision"] == "allow"
+
+    def test_rg_search_allowed(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "rg 'pattern' src/"}}
+        })
+        assert result["decision"] == "allow"
+
+    def test_grep_allowed(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "grep -r 'TODO' ."}}
+        })
+        assert result["decision"] == "allow"
+
+    def test_ls_allowed(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "ls -la"}}
+        })
+        assert result["decision"] == "allow"
+
+    def test_tree_allowed(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "tree src/"}}
+        })
+        assert result["decision"] == "allow"
+
+    def test_echo_allowed(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "echo hello"}}
+        })
+        assert result["decision"] == "allow"
+
+    def test_kubectl_blocked(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "kubectl logs pod-1"}}
+        })
+        assert result["decision"] == "deny"
+
+    def test_docker_blocked(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "docker exec -it container bash"}}
+        })
+        assert result["decision"] == "deny"
+
+    def test_mvn_blocked(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "mvn clean install"}}
+        })
+        assert result["decision"] == "deny"
+
+    def test_rm_blocked(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "rm -rf /tmp/test"}}
+        })
+        assert result["decision"] == "deny"
+
+    def test_pytest_allowed(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "pytest tests/ -v"}}
+        })
+        assert result["decision"] == "allow"
+
+    def test_rtk_prefixed_allowed(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "rtk kubectl get pods"}}
+        })
+        assert result["decision"] == "allow"
+
+    def test_safe_with_env_vars(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "RUST_LOG=debug git status"}}
         })
         assert result["decision"] == "allow"

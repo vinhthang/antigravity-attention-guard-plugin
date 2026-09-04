@@ -11,7 +11,11 @@ MAX_INJECTION_BYTES = 16384
 
 
 def find_rules(workspace_paths):
-    """Discover all instruction files: plugin rules, project rules, global rules, and skills."""
+    """Discover applicable rule files only (no skills).
+    
+    Loads: plugin core rules, workspace rules, global always-on rules.
+    Excludes: skills (they use progressive disclosure and shouldn't be bulk-injected).
+    """
     plugin_rules_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "rules"))
     rules = []
 
@@ -36,21 +40,13 @@ def find_rules(workspace_paths):
                     if f.endswith(".md"):
                         rules.append(os.path.join(root, f))
 
-    # 3. Global rules
+    # 3. Global rules (NOT skills — skills use progressive disclosure)
     global_rules_dir = os.path.expanduser("~/.gemini/config/rules")
     if os.path.exists(global_rules_dir):
         for root, _, files in os.walk(global_rules_dir):
             for f in sorted(files):
                 if f.endswith(".md"):
                     rules.append(os.path.join(root, f))
-
-    # 4. Global skills
-    global_skills_dir = os.path.expanduser("~/.gemini/config/skills")
-    if os.path.exists(global_skills_dir):
-        for skill_name in sorted(os.listdir(global_skills_dir)):
-            skill_md = os.path.join(global_skills_dir, skill_name, "SKILL.md")
-            if os.path.exists(skill_md):
-                rules.append(skill_md)
 
     # Deduplicate while preserving order
     seen = set()
@@ -169,9 +165,9 @@ def main():
                 rule_contents.append(f"=== {os.path.basename(rule_path)} === (could not read)")
 
         injected_text = (
-            "ATTENTION DILUTION DETECTED! You forgot to report the 'Summary of skills used:'. "
-            "Your context has been refreshed with all active rules below. "
-            "Re-read them carefully and correct your response.\n\n"
+            "Your response is missing 'Summary of skills used:'. "
+            "The following rules have been reintroduced into your context. "
+            "Review them and include the summary in your response.\n\n"
             + "\n\n".join(rule_contents)
         )
         # Cap injection to prevent context overflow

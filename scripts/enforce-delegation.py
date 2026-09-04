@@ -19,6 +19,40 @@ WRITE_VERB_PREFIXES = (
 MCP_SCHEMA_DIR = os.path.expanduser("~/.gemini/antigravity/mcp")
 MCP_CACHE_TTL = 300  # seconds
 
+# Read-only commands the primary agent can run directly.
+# These produce bounded output unlikely to cause attention dilution.
+# RTK will further compress output for RTK-compatible commands.
+PRIMARY_SAFE_COMMANDS = [
+    # Version control (read-only)
+    "git status", "git branch", "git log", "git diff", "git show",
+    "git stash list", "git remote", "git tag", "git rev-parse",
+    # Search (bounded by pattern matching)
+    "rg ", "grep ", "ag ", "ack ",
+    # File inspection (bounded output)
+    "wc ", "head ", "tail ", "file ", "stat ",
+    # Directory listing
+    "ls", "tree",
+    # System info (tiny output)
+    "echo ", "date", "whoami", "pwd", "which ", "type ",
+    # Already compressed
+    "rtk ",
+    # Test runners (output compressed by RTK)
+    "pytest", "python3 -m pytest",
+]
+
+_PRIMARY_SAFE_RE = re.compile(
+    r'^(' + '|'.join(re.escape(cmd.rstrip()) for cmd in sorted(PRIMARY_SAFE_COMMANDS, key=len, reverse=True)) + r')(\s|$)',
+)
+
+def is_safe_primary_command(command_line):
+    """Check if a command is safe for the primary agent to run directly."""
+    # Strip env vars, sudo, time, nice prefixes
+    match = re.match(r'^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+|sudo\s+|time\s+|nice\s+)*(.*)', command_line)
+    core_cmd = match.group(1) if match else command_line
+    if not core_cmd:
+        return False
+    return bool(_PRIMARY_SAFE_RE.match(core_cmd))
+
 
 def discover_mcp_write_tools():
     """Scan MCP schema directories to discover write/mutating tools.
@@ -112,6 +146,13 @@ def main():
         if tool_name == "generate_image":
             print(json.dumps({"decision": "allow"}))
             return
+
+        # Allow Primary Agent to run bounded, read-only commands
+        if tool_name == "run_command":
+            command_line = args.get("CommandLine", "")
+            if is_safe_primary_command(command_line):
+                print(json.dumps({"decision": "allow"}))
+                return
 
         # Check if this is an MCP tool call
         if tool_name == "call_mcp_tool":

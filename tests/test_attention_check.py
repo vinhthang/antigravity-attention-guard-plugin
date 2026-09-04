@@ -128,3 +128,26 @@ class TestContentCap:
         reason = result.get("reason", "")
         # Reason should exist and be capped
         assert len(reason.encode("utf-8")) <= 16384 + 200  # Allow some buffer for truncation notice
+
+
+class TestSelectiveRuleRefresh:
+    def test_no_skills_injected(self, tmp_path):
+        """Skills should NOT be loaded - only rules."""
+        conv_id = f"chk-norules-{os.getpid()}"
+        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
+        create_transcript(str(transcript), [
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "No summary here."}
+        ])
+        result = run_hook({
+            "fullyIdle": True,
+            "modelName": "claude-opus-4.6",
+            "conversationId": conv_id,
+            "transcriptPath": str(transcript),
+            "workspacePaths": []
+        })
+        assert result.get("decision") == "continue"
+        reason = result.get("reason", "")
+        # Should NOT contain skill-related content
+        assert "SKILL.md" not in reason
+        # Should contain honest messaging
+        assert "reintroduced" in reason.lower() or "rules" in reason.lower()
