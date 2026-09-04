@@ -35,11 +35,17 @@ class TestSubagentSkip:
         result = run_hook({"fullyIdle": True, "modelName": "gemini-2.0-flash", "conversationId": "chk-1"})
         assert result == {}
 
-    def test_subagent_with_marker_skipped(self, tmp_path):
-        """Marker in USER_INPUT (real Antigravity format) should be detected."""
+    def test_subagent_with_token_skipped(self, tmp_path):
+        """Token in USER_INPUT should be detected and validated."""
+        cache_dir = os.path.join(str(tmp_path), "cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        token_file = os.path.join(cache_dir, "agy_issued_token_abc-123")
+        with open(token_file, "w") as f:
+            f.write("parent")
+            
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(
-            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do task\\n\\n[ANTIGRAVITY_SUBAGENT:conv-123:456]"}\n'
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do task\\n\\n[ANTIGRAVITY_TOKEN:abc-123]"}\n'
         )
         result = run_hook({
             "fullyIdle": True,

@@ -32,19 +32,20 @@ def main():
             subagents = args.get("Subagents", [])
             parent_conv_id = payload.get("conversationId", "unknown")
             
-            # Record the PRIMARY agent's conversationId
-            cache_dir = get_cache_dir()
-            try:
-                primary_file = os.path.join(cache_dir, f"agy_primary_{parent_conv_id}")
-                with open(primary_file, "w") as f:
-                    f.write(str(time.time()))
-            except Exception:
-                pass
+            import uuid
             
-            base_seq = int(time.time() * 1000)
-            for i, sa in enumerate(subagents):
-                marker = f"[ANTIGRAVITY_SUBAGENT:{parent_conv_id}:{base_seq + i}]"
-                sa["Prompt"] = sa.get("Prompt", "") + injected + f"\n\n{marker}"
+            # Issue a token for each child subagent
+            cache_dir = get_cache_dir()
+            
+            for sa in subagents:
+                token = str(uuid.uuid4())
+                try:
+                    token_file = os.path.join(cache_dir, f"agy_issued_token_{token}")
+                    with open(token_file, "w") as f:
+                        f.write(parent_conv_id)
+                except Exception:
+                    pass
+                sa["Prompt"] = sa.get("Prompt", "") + injected + f"\n\n[ANTIGRAVITY_TOKEN:{token}]"
 
             print(json.dumps({
                 "decision": "allow",

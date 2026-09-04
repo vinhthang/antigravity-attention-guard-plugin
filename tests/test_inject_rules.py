@@ -37,11 +37,11 @@ class TestRuleInjection:
         assert "overwrite" in result
         subagents = result["overwrite"]["Subagents"]
         assert len(subagents) == 1
-        assert "[ANTIGRAVITY_SUBAGENT:parent-123:" in subagents[0]["Prompt"]
+        assert "[ANTIGRAVITY_TOKEN:" in subagents[0]["Prompt"]
         assert "INJECTED RULES" in subagents[0]["Prompt"]
 
-    def test_records_primary_agent_id(self, tmp_path):
-        """invoke_subagent should record the parent's conversationId as primary."""
+    def test_issues_tokens(self, tmp_path):
+        """invoke_subagent should issue tokens for subagents."""
         result = run_hook({
             "conversationId": "primary-abc-123",
             "toolCall": {
@@ -52,12 +52,18 @@ class TestRuleInjection:
             }
         })
         assert result["decision"] == "allow"
-        # Check that the primary ID was recorded
+        subagents = result["overwrite"]["Subagents"]
+        
+        import re
+        match = re.search(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]', subagents[0]["Prompt"])
+        assert match
+        token = match.group(1)
+        
         cache_dir = os.path.join(str(tmp_path), "cache")
-        primary_file = os.path.join(cache_dir, "agy_primary_primary-abc-123")
-        assert os.path.exists(primary_file)
+        token_file = os.path.join(cache_dir, f"agy_issued_token_{token}")
+        assert os.path.exists(token_file)
 
-    def test_unique_sequences_in_batch(self):
+    def test_unique_tokens_in_batch(self):
         result = run_hook({
             "conversationId": "parent-456",
             "toolCall": {
@@ -72,17 +78,15 @@ class TestRuleInjection:
             }
         })
         subagents = result["overwrite"]["Subagents"]
-        # Extract markers
-        markers = []
+        # Extract tokens
+        tokens = []
         for sa in subagents:
             import re
-            match = re.search(r'\[ANTIGRAVITY_SUBAGENT:[^:]+:(\d+)\]', sa["Prompt"])
-            assert match, f"Marker not found in prompt: {sa['Prompt'][-100:]}"
-            markers.append(int(match.group(1)))
-        # All markers should be unique and sequential
-        assert len(set(markers)) == 3, f"Markers should be unique: {markers}"
-        assert markers[1] == markers[0] + 1
-        assert markers[2] == markers[1] + 1
+            match = re.search(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]', sa["Prompt"])
+            assert match, f"Token not found in prompt: {sa['Prompt'][-100:]}"
+            tokens.append(match.group(1))
+        # All tokens should be unique
+        assert len(set(tokens)) == 3, f"Tokens should be unique: {tokens}"
 
     def test_non_subagent_tool_passes_through(self):
         result = run_hook({

@@ -8,16 +8,17 @@ import time
 from common import is_subagent, get_cache_dir
 
 
-# Verb prefixes that indicate a mutating/write MCP tool
-WRITE_VERB_PREFIXES = (
-    "write", "edit", "create", "update", "delete", "remove",
-    "push", "move", "fork", "insert", "modify", "set", "put",
-    "patch", "deploy", "add", "transition", "fill",
-    "merge", "submit", "approve", "publish", "archive", "send", "commit", "upload",
-)
+MCP_READ_ALLOWLIST = {
+    "codegraph_search", "codegraph_context", "codegraph_callers", 
+    "codegraph_callees", "codegraph_node", "codegraph_explore",
+    "codegraph_status", "codegraph_files", "codegraph_impact",
+    "resolve-library-id", "query-docs",
+    "sequentialthinking",
+    "read_file", "read_text_file", "read_media_file", 
+    "read_multiple_files", "list_directory", "list_directory_with_sizes",
+    "directory_tree", "search_files", "get_file_info", "list_allowed_directories",
+}
 
-MCP_SCHEMA_DIR = os.path.expanduser("~/.gemini/antigravity/mcp")
-MCP_CACHE_TTL = 300  # seconds
 
 # Read-only commands the primary agent can run directly.
 # These produce bounded output unlikely to cause attention dilution.
@@ -54,52 +55,7 @@ def is_safe_primary_command(command_line):
     return bool(_PRIMARY_SAFE_RE.match(core_cmd))
 
 
-def discover_mcp_write_tools():
-    """Scan MCP schema directories to discover write/mutating tools.
-    
-    Caches the result in a temp file for 5 minutes to avoid
-    repeated filesystem scans on every hook invocation.
-    """
-    cache_file = os.path.join(get_cache_dir(), "agy_mcp_write_tools.json")
-    
-    # Check cache
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, "r") as f:
-                cached = json.load(f)
-            if time.time() - cached.get("timestamp", 0) < MCP_CACHE_TTL:
-                return set(cached.get("tools", []))
-        except Exception:
-            pass
-    
-    # Scan MCP schema directories
-    write_tools = set()
-    if os.path.exists(MCP_SCHEMA_DIR):
-        try:
-            for server_name in os.listdir(MCP_SCHEMA_DIR):
-                server_dir = os.path.join(MCP_SCHEMA_DIR, server_name)
-                if not os.path.isdir(server_dir):
-                    continue
-                for filename in os.listdir(server_dir):
-                    if not filename.endswith(".json"):
-                        continue
-                    tool_name = filename[:-5]  # Remove .json
-                    tool_lower = tool_name.lower()
-                    for prefix in WRITE_VERB_PREFIXES:
-                        if tool_lower.startswith(prefix):
-                            write_tools.add(tool_lower)
-                            break
-        except Exception:
-            pass
-    
-    # Write cache
-    try:
-        with open(cache_file, "w") as f:
-            json.dump({"timestamp": time.time(), "tools": list(write_tools)}, f)
-    except Exception:
-        pass
-    
-    return write_tools
+
 
 
 def is_artifact_path(target_file, artifact_dir):
@@ -154,13 +110,18 @@ def main():
                 print(json.dumps({"decision": "allow"}))
                 return
 
-        # Check if this is an MCP tool call
+        # Enforce MCP Tool Allowlist for Primary Agent
         if tool_name == "call_mcp_tool":
-            mcp_tool = args.get("ToolName", "").lower()
-            mcp_write_tools = discover_mcp_write_tools()
-            if mcp_tool not in mcp_write_tools:
+            mcp_tool_name = args.get("ToolName", "")
+            if mcp_tool_name in MCP_READ_ALLOWLIST:
                 print(json.dumps({"decision": "allow"}))
                 return
+            
+            print(json.dumps({
+                "decision": "deny", 
+                "reason": f"Attention Dilution Guard: The Primary Agent is restricted to read-only MCP tools. The tool '{mcp_tool_name}' must be delegated to a subagent."
+            }))
+            return
 
         # Block Primary Agent from direct code execution and file modifications
         print(json.dumps({

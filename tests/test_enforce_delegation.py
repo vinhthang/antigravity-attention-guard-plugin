@@ -14,7 +14,7 @@ spec = importlib.util.spec_from_file_location(
 )
 enforce_mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(enforce_mod)
-WRITE_VERB_PREFIXES = enforce_mod.WRITE_VERB_PREFIXES
+MCP_READ_ALLOWLIST = enforce_mod.MCP_READ_ALLOWLIST
 is_artifact_path = enforce_mod.is_artifact_path
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "enforce-delegation.py")
@@ -36,74 +36,31 @@ def run_hook(payload):
 
 
 class TestSubagentDetection:
-    def test_flash_model_allowed_no_transcript(self):
-        """Flash model without transcript should be treated as subagent."""
-        result = run_hook({"modelName": "gemini-2.0-flash", "toolCall": {"args": {}}})
-        assert result["decision"] == "allow"
-
     def test_primary_agent_blocked(self):
         result = run_hook({"modelName": "claude-opus-4.6", "toolCall": {"args": {"TargetFile": "/some/code.py"}}})
         assert result["decision"] == "deny"
 
-    def test_subagent_with_marker_in_user_input_allowed(self, tmp_path):
-        """Real Antigravity transcripts record the injected prompt as USER_INPUT.
-        The marker should still be detected via raw byte scanning."""
+    def test_subagent_with_token_allowed(self, tmp_path):
+        cache_dir = os.path.join(str(tmp_path), "cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        token_file = os.path.join(cache_dir, "agy_issued_token_1234-abcd")
+        with open(token_file, "w") as f:
+            f.write("parent")
+            
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(
-            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do the task\\n\\n[ANTIGRAVITY_SUBAGENT:abc:123]"}\n'
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do the task\\n\\n[ANTIGRAVITY_TOKEN:1234-abcd]"}\n'
         )
         data = {"transcriptPath": str(transcript), "modelName": "claude-opus-4.6"}
         assert is_subagent(data) is True
 
-    def test_conversation_id_tracking_blocks_primary(self, tmp_path):
-        """A conversationId recorded as primary should be blocked."""
-        cache_dir = os.path.join(str(tmp_path), "cache")
-        os.makedirs(cache_dir, exist_ok=True)
-        primary_file = os.path.join(cache_dir, "agy_primary_conv-primary-123")
-        with open(primary_file, "w") as f:
-            f.write("1234567890")
-        data = {"conversationId": "conv-primary-123", "modelName": "claude-opus-4.6"}
-        assert is_subagent(data) is False
-
-    def test_unknown_conversation_id_with_marker_allowed(self, tmp_path):
-        """Unknown conversationId with marker in transcript should be allowed."""
-        cache_dir = os.path.join(str(tmp_path), "cache")
-        os.makedirs(cache_dir, exist_ok=True)
+    def test_subagent_with_invalid_token_blocked(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(
-            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "[ANTIGRAVITY_SUBAGENT:abc:123]"}\n'
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do the task\\n\\n[ANTIGRAVITY_TOKEN:1234-abcd]"}\n'
         )
-        data = {"conversationId": "conv-subagent-456", "transcriptPath": str(transcript)}
-        assert is_subagent(data) is True
-
-    def test_multi_level_delegation_subagent_takes_precedence(self, tmp_path):
-        """A middle-tier agent (has marker AND has primary cache) should be treated as subagent."""
-        cache_dir = os.path.join(str(tmp_path), "cache")
-        os.makedirs(cache_dir, exist_ok=True)
-        # Create primary cache file for this conversation
-        primary_file = os.path.join(cache_dir, "agy_primary_mid-tier-conv")
-        with open(primary_file, "w") as f:
-            f.write("1234567890")
-        # Create transcript with marker
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text(
-            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do task\\n\\n[ANTIGRAVITY_SUBAGENT:parent:123]"}\n'
-        )
-        data = {"conversationId": "mid-tier-conv", "transcriptPath": str(transcript)}
-        assert is_subagent(data) is True  # Marker takes precedence over primary cache
-
-    def test_flash_with_transcript_no_marker_blocked(self, tmp_path):
-        """Flash model WITH transcript but no marker should be blocked."""
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text('{"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "hello"}\n')
-        data = {"transcriptPath": str(transcript), "modelName": "gemini-2.0-flash"}
+        data = {"transcriptPath": str(transcript), "modelName": "claude-opus-4.6"}
         assert is_subagent(data) is False
-
-    def test_model_name_fallback_no_transcript(self):
-        assert is_subagent({"modelName": "gemini-2.0-flash"}) is True
-        assert is_subagent({"modelName": "gemini-2.0-flash-lite"}) is True
-        assert is_subagent({"modelName": "claude-3-5-sonnet"}) is False
-        assert is_subagent({}) is False
 
 
 class TestArtifactPath:
@@ -118,16 +75,11 @@ class TestArtifactPath:
         assert is_artifact_path("/Users/code/project/main.py", "/home/user/.gemini/brain/abc") is False
 
 
-class TestWriteVerbPrefixes:
-    def test_write_verbs_present(self):
-        expected_verbs = [
-            "write", "edit", "create", "update", "delete", "remove",
-            "push", "move", "fork", "insert", "modify", "set", "put",
-            "patch", "deploy", "add", "transition", "fill",
-            "merge", "submit", "approve", "publish", "archive", "send", "commit", "upload",
-        ]
-        for verb in expected_verbs:
-            assert verb in WRITE_VERB_PREFIXES
+class TestMCPAllowlist:
+    def test_mcp_read_allowlist(self):
+        assert "read_file" in MCP_READ_ALLOWLIST
+        assert "codegraph_search" in MCP_READ_ALLOWLIST
+
 
 
 class TestGenerateImageAllowed:
