@@ -1,0 +1,10 @@
+{
+  "conversationId": "75eefb1b-e97c-4faa-b058-ab3bb87b1547",
+  "transcriptPath": "/Users/thanghoang/.gemini/antigravity/brain/75eefb1b-e97c-4faa-b058-ab3bb87b1547/.system_generated/logs/transcript.jsonl",
+  "toolCall": {
+    "name": "default_api:run_command",
+    "args": {
+      "CommandLine": "echo hello"
+    }
+  }
+}
