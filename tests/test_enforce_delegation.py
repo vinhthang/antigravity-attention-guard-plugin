@@ -45,7 +45,7 @@ class TestSubagentDetection:
         os.makedirs(cache_dir, exist_ok=True)
         token_file = os.path.join(cache_dir, "agy_issued_token_1234-abcd")
         with open(token_file, "w") as f:
-            f.write("parent")
+            json.dump({"issuer": "parent", "recipient": None}, f)
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(

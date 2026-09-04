@@ -17,9 +17,8 @@ MCP_READ_ALLOWLIST = {
     ("context7", "resolve-library-id"), ("context7", "query-docs"),
     ("sequential-thinking", "sequentialthinking"),
     ("server-filesystem", "read_file"), ("server-filesystem", "read_text_file"),
-    ("server-filesystem", "read_media_file"), ("server-filesystem", "read_multiple_files"),
+    ("server-filesystem", "read_media_file"),
     ("server-filesystem", "list_directory"), ("server-filesystem", "list_directory_with_sizes"),
-    ("server-filesystem", "directory_tree"), ("server-filesystem", "search_files"),
     ("server-filesystem", "get_file_info"), ("server-filesystem", "list_allowed_directories")
 }
 

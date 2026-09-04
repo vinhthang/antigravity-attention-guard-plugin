@@ -1,1 +1,0 @@
-{"decision": "deny", "reason": "Attention Dilution Guard: The Primary Agent is restricted to planning and artifact creation. Direct code modification and shell execution must be delegated to a subagent."}

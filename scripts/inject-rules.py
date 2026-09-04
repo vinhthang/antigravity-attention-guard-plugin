@@ -42,7 +42,7 @@ def main():
                 try:
                     token_file = os.path.join(cache_dir, f"agy_issued_token_{token}")
                     with open(token_file, "w") as f:
-                        f.write(parent_conv_id)
+                        json.dump({"issuer": parent_conv_id, "recipient": None}, f)
                 except Exception:
                     pass
                 sa["Prompt"] = f"[ANTIGRAVITY_TOKEN:{token}]\n\n" + sa.get("Prompt", "") + injected

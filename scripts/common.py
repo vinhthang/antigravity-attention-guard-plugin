@@ -34,10 +34,19 @@ def is_subagent(data):
                         os.remove(token_file)
                         continue
 
-                    with open(token_file, "r") as f:
-                        issuer_id = f.read().strip()
-                    if issuer_id != conv_id:
-                        return True
+                    with open(token_file, "r+") as f:
+                        t_data = json.load(f)
+                        if t_data.get("issuer") == conv_id:
+                            continue
+
+                        if t_data.get("recipient") is None:
+                            t_data["recipient"] = conv_id
+                            f.seek(0)
+                            json.dump(t_data, f)
+                            f.truncate()
+                            return True
+                        elif t_data.get("recipient") == conv_id:
+                            return True
                 except Exception:
                     pass
     except Exception:

@@ -38,7 +38,7 @@ class TestSubagentSkip:
         os.makedirs(cache_dir, exist_ok=True)
         token_file = os.path.join(cache_dir, "agy_issued_token_abc-123")
         with open(token_file, "w") as f:
-            f.write("parent")
+            json.dump({"issuer": "parent", "recipient": None}, f)
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(
@@ -138,22 +138,22 @@ class TestContentCap:
         plugin_rules_dir.mkdir()
         for i in range(100):
             (plugin_rules_dir / f"rule_{i}.md").write_text("a" * 1000)
-        
+
         # Put rules in workspace path
         workspace_dir = tmp_path / "workspace"
         workspace_dir.mkdir()
         agents_rules_dir = workspace_dir / ".agents" / "rules"
         agents_rules_dir.mkdir(parents=True)
-        
+
         for i in range(50):
             (agents_rules_dir / f"rule_{i}.md").write_text("a" * 1000)
-        
+
         conv_id = f"chk-cap-many-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
             {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "No summary here." + " padding" * 30}
         ])
-        
+
         result = run_hook({
             "fullyIdle": True,
             "modelName": "claude-opus-4.6",
@@ -161,7 +161,7 @@ class TestContentCap:
             "transcriptPath": str(transcript),
             "workspacePaths": [str(workspace_dir)]
         })
-        
+
         assert result.get("decision") == "continue"
         reason = result.get("reason", "")
         # Reason should exist and be capped

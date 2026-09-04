@@ -173,15 +173,16 @@ def main():
             "The following rules have been reintroduced into your context. "
             "Review them and include the summary in your response.\n\n"
         )
-        
+
         injected_text = base_msg
         current_bytes = len(injected_text.encode("utf-8"))
-        
+
         for content in rule_contents:
             rule_bytes = len((content + "\n\n").encode("utf-8"))
             if current_bytes + rule_bytes > MAX_INJECTION_BYTES:
-                injected_text += "\n\n[... remaining rules truncated to prevent context overflow ...]"
-                break
+                if "[... rule omitted" not in injected_text:
+                    injected_text += "\n\n[... rule omitted to prevent context overflow ...]"
+                continue
             injected_text += content + "\n\n"
             current_bytes += rule_bytes
 
