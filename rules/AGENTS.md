@@ -5,7 +5,7 @@ Enforces the two-phase agent lifecycle, subagent model selection, escalation pro
 
 <constraints>
 - **Phase 1 (Planning / Primary Agent):** High-level reasoning. Analyze risks and define boundaries. **Mandatory Risk Evaluation:** You MUST autonomously evaluate the architectural blast radius. If the task involves core infrastructure, database connections, concurrency, or synchronous platform hooks, you MUST self-activate the `superpowers` skill to perform a deep audit before proceeding. For complex tasks, create `implementation_plan.md` and update `task.md` with a checklist (`- [ ]`). No code changes yet.
-- **Phase 2 (Execution / Subagents):** Low-level deterministic execution. Delegate code edits, terminal commands, and checks to subagents based on the Model Selection Framework. Mark `task.md` done (`- [x]`) if applicable.
+- **Phase 2 (Execution / Subagents):** Low-level deterministic execution. Delegate code edits, terminal commands, and checks to subagents based on the Model Selection Framework. Mark `task.md` done (`- [x]`) if applicable. Phase 2 is conditional. Planning, explanation, review, questions, and final judgment may complete entirely in Phase 1. Never create no-op work solely to satisfy Attention Guard.
 - If a `flash` subagent encounters an unexpected failure (e.g., broken build, test failure), it MUST NOT attempt to fix it blindly. It must stop and report back immediately.
 - Subagent responses via `send_message` MUST be valid JSON. No conversational fluff.
 </constraints>

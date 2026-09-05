@@ -53,7 +53,7 @@ class TestSubagentDetection:
             '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do the task\\n\\n[ANTIGRAVITY_TOKEN:1234-abcd]"}\n'
         )
         data = {"transcriptPath": str(transcript), "modelName": "claude-opus-4.6"}
-        assert is_subagent(data) == (True, False)
+        assert is_subagent(data) == (True, False, 0)
 
     def test_subagent_with_invalid_token_blocked(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
@@ -61,7 +61,7 @@ class TestSubagentDetection:
             '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do the task\\n\\n[ANTIGRAVITY_TOKEN:1234-abcd]"}\n'
         )
         data = {"transcriptPath": str(transcript), "modelName": "claude-opus-4.6"}
-        assert is_subagent(data) == (False, False)
+        assert is_subagent(data) == (False, False, 0)
 
 
 class TestArtifactPath:
@@ -108,3 +108,24 @@ class TestGenerateImageAllowed:
 
         result = run_hook(payload)
         assert result.get("decision") == "deny"
+class TestCoordinatorDelegation:
+    def test_coordinator_can_delegate(self, tmp_path):
+        from test_enforce_delegation import run_hook
+        import os, json
+        cache_dir = os.path.join(str(tmp_path), "cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        token = "a1b2c3d4-4321"
+        token_file = os.path.join(cache_dir, f"agy_issued_token_{token}")
+        with open(token_file, "w") as f:
+            json.dump({"issuer": "parent", "recipient": None, "may_delegate": True, "remaining_depth": 1}, f)
+
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(f'{{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do the task\\n\\n[ANTIGRAVITY_TOKEN:{token}]"}}\n')
+
+        payload = {
+            "transcriptPath": str(transcript),
+            "toolCall": {"name": "invoke_subagent", "args": {}}
+        }
+
+        result = run_hook(payload)
+        assert result.get("decision") == "allow"

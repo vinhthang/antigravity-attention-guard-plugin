@@ -4,28 +4,38 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 import json
 import time
-from common import is_subagent, get_cache_dir
+from common import is_subagent, get_cache_dir, get_turn_state
 
 MAX_STOP_REJECTIONS = 2
 
-def has_delegated(transcript_path):
+def has_valid_handoff_after(transcript_path, start_line):
     if not transcript_path or not os.path.exists(transcript_path):
         return False
     try:
-        found_delegation = False
+        found_invoke = False
         with open(transcript_path, "r", encoding="utf-8") as f:
-            for line in f:
+            for i, line in enumerate(f):
+                if i < start_line:
+                    continue
                 try:
                     step = json.loads(line)
-                    if str(step.get("source", "")).startswith("USER"):
-                        found_delegation = False
+                    # Check for MODEL tool call
                     if step.get("source") == "MODEL" and "tool_calls" in step:
                         for tc in step["tool_calls"]:
-                            if tc.get("name") in ["invoke_subagent", "manage_subagents"]:
-                                found_delegation = True
-                except json.JSONDecodeError:
+                            name = tc.get("name", "")
+                            args_str = json.dumps(tc.get("args", {}))
+                            if name in ["invoke_subagent", "default_api:invoke_subagent"]:
+                                # ignore dummy tasks
+                                if "date" not in args_str.lower() and "dummy" not in args_str.lower():
+                                    found_invoke = True
+                    # Check for TOOL response indicating failure
+                    if step.get("source") == "TOOL" or step.get("type") == "TOOL_RESPONSE":
+                        line_str = line.lower()
+                        if "invoke_subagent" in line_str and "error" in line_str:
+                            found_invoke = False
+                except Exception:
                     pass
-        return found_delegation
+        return found_invoke
     except Exception:
         pass
     return False
@@ -50,7 +60,13 @@ def increment_rejection_count(tracker):
 def reset_rejection_count(tracker):
     count_file = tracker + "_stop_count"
     if os.path.exists(count_file):
-        os.remove(count_file)
+        try:
+            os.remove(count_file)
+        except: pass
+    if os.path.exists(tracker + ".json"):
+        try:
+            os.remove(tracker + ".json")
+        except: pass
 
 def main(argv=None, stdin=None, stdout=None):
     if argv is None:
@@ -73,16 +89,31 @@ def main(argv=None, stdin=None, stdout=None):
         emit({"decision": "allow"})
         return
 
-    is_sub, _ = is_subagent(payload)
+    is_sub, _, _ = is_subagent(payload)
     if is_sub:
         emit({"decision": "allow"})
         return
 
     conv_id = payload.get("conversationId", "unknown")
-    tracker = os.path.join(get_cache_dir(), f"reject_count_{conv_id}")
     transcript_path = payload.get("transcriptPath", "")
+    turn_id, _ = get_turn_state(transcript_path)
+    
+    tracker = os.path.join(get_cache_dir(), f"violation_{conv_id}_{turn_id}")
+    marker_path = tracker + ".json"
+    
+    if not os.path.exists(marker_path):
+        emit({"decision": "allow"})
+        return
+        
+    try:
+        with open(marker_path, "r") as f:
+            marker = json.load(f)
+        start_line = marker.get("transcript_lines", 0)
+    except Exception:
+        emit({"decision": "allow"})
+        return
 
-    if has_delegated(transcript_path):
+    if has_valid_handoff_after(transcript_path, start_line):
         reset_rejection_count(tracker)
         emit({"decision": "allow"})
         return

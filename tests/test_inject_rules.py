@@ -98,3 +98,39 @@ class TestRuleInjection:
         })
         assert result["decision"] == "allow"
         assert "overwrite" not in result
+def test_coordinator_creates_leaf_worker(tmp_path):
+    import os, json, re
+    from test_inject_rules import run_hook
+    # Setup parent token as a coordinator (may_delegate=True, remaining_depth=1)
+    cache_dir = os.path.join(str(tmp_path), "cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    parent_token = "a1b2c3d4-1234"
+    token_file = os.path.join(cache_dir, f"agy_issued_token_{parent_token}")
+    with open(token_file, "w") as f:
+        json.dump({"issuer": "root", "recipient": "coord-conv", "may_delegate": True, "remaining_depth": 1}, f)
+
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        f'{{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do the task\\n\\n[ANTIGRAVITY_TOKEN:{parent_token}]"}}\n'
+    )
+
+    result = run_hook({
+        "conversationId": "coord-conv",
+        "transcriptPath": str(transcript),
+        "toolCall": {
+            "name": "invoke_subagent",
+            "args": {
+                "Subagents": [{"Prompt": "Do work", "TypeName": "DeepCoder"}]
+            }
+        }
+    })
+    
+    subagents = result["overwrite"]["Subagents"]
+    match = re.search(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]', subagents[0]["Prompt"])
+    child_token = match.group(1)
+
+    with open(os.path.join(cache_dir, f"agy_issued_token_{child_token}"), "r") as f:
+        child_data = json.load(f)
+    
+    assert child_data["may_delegate"] is False
+    assert child_data["remaining_depth"] == 0

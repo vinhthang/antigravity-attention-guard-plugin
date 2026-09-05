@@ -28,7 +28,7 @@ def is_subagent(data):
 
     transcript_path = data.get("transcriptPath", "")
     if not transcript_path or not os.path.exists(transcript_path):
-        return False, False
+        return False, False, 0
 
     try:
         with open(transcript_path, "r", encoding="utf-8") as f:
@@ -58,9 +58,9 @@ def is_subagent(data):
                                 f.seek(0)
                                 json.dump(t_data, f)
                                 f.truncate()
-                                return True, t_data.get("may_delegate", False)
+                                return True, t_data.get("may_delegate", False), t_data.get("remaining_depth", 0)
                             elif t_data.get("recipient") == conv_id:
-                                return True, t_data.get("may_delegate", False)
+                                return True, t_data.get("may_delegate", False), t_data.get("remaining_depth", 0)
                         finally:
                             fcntl.flock(f, fcntl.LOCK_UN)
                 except Exception:
@@ -68,4 +68,23 @@ def is_subagent(data):
     except Exception:
         pass
 
-    return False, False
+    return False, False, 0
+
+def get_turn_state(transcript_path):
+    turn_id = 0
+    lines_count = 0
+    if not transcript_path or not os.path.exists(transcript_path):
+        return turn_id, lines_count
+    try:
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            for line in f:
+                lines_count += 1
+                try:
+                    step = json.loads(line)
+                    if str(step.get("source", "")).startswith("USER"):
+                        turn_id += 1
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return turn_id, lines_count

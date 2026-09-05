@@ -21,4 +21,4 @@ def test_large_prompt_token_present(tmp_path):
     )
 
     data = {"transcriptPath": str(transcript), "modelName": "claude-opus-4.6"}
-    assert is_subagent(data) == (True, False)
+    assert is_subagent(data) == (True, False, 0)

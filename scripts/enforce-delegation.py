@@ -5,8 +5,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import json
 import re
 import time
-from common import is_subagent, get_cache_dir
-
+from common import is_subagent, get_cache_dir, get_turn_state
 
 MCP_READ_ALLOWLIST = {
     ("codegraph", "codegraph_search"), ("codegraph", "codegraph_context"),
@@ -22,11 +21,7 @@ MCP_READ_ALLOWLIST = {
     ("server-filesystem", "get_file_info"), ("server-filesystem", "list_allowed_directories")
 }
 
-
 def is_artifact_path(target_file, artifact_dir):
-    """Check if target_file is within the artifact (brain/) directory.
-    Uses realpath to prevent symlink escapes.
-    """
     if not target_file:
         return False
     norm_target = os.path.realpath(os.path.abspath(target_file))
@@ -35,7 +30,6 @@ def is_artifact_path(target_file, artifact_dir):
         if os.path.commonpath([norm_target, norm_artifact]) == norm_artifact:
             return True
     return False
-
 
 def main(argv=None, stdin=None, stdout=None):
     if argv is None: argv = sys.argv
@@ -53,19 +47,30 @@ def main(argv=None, stdin=None, stdout=None):
 
         data = json.loads(raw_payload)
 
-        # Allow subagents to execute freely
-        is_sub, may_delegate = is_subagent(data)
+        def emit_deny(reason):
+            try:
+                transcript_path = data.get("transcriptPath", "")
+                turn_id, lines = get_turn_state(transcript_path)
+                conv_id = data.get("conversationId", "unknown")
+                marker_path = os.path.join(get_cache_dir(), f"violation_{conv_id}_{turn_id}.json")
+                if not os.path.exists(marker_path):
+                    with open(marker_path, "w") as f:
+                        json.dump({"turn_id": turn_id, "transcript_lines": lines}, f)
+            except Exception:
+                pass
+            emit({"decision": "deny", "reason": reason})
+
+        is_sub, may_delegate, remaining_depth = is_subagent(data)
         if is_sub:
             tool_call = data.get("toolCall", {})
             tool_name = tool_call.get("name", "")
             if tool_name in ["invoke_subagent", "manage_subagents", "default_api:invoke_subagent", "default_api:manage_subagents"]:
-                if not may_delegate:
-                    emit({"decision": "deny", "reason": "Attention Dilution Guard: Subagents are forbidden from delegating tasks further. Do not invoke or manage subagents."})
+                if not may_delegate or remaining_depth <= 0:
+                    emit_deny("Attention Dilution Guard: Subagents are forbidden from delegating tasks further. Do not invoke or manage subagents.")
                     return
             emit({"decision": "allow"})
             return
 
-        # Allow Primary Agent to write artifacts
         tool_call = data.get("toolCall", {})
         tool_name = tool_call.get("name", "")
         args = tool_call.get("args", {})
@@ -76,17 +81,14 @@ def main(argv=None, stdin=None, stdout=None):
                 emit({"decision": "allow"})
                 return
 
-        # Allow Primary Agent to generate images (used for artifacts and UI mockups)
         if tool_name in ["generate_image", "default_api:generate_image"]:
             emit({"decision": "allow"})
             return
 
-        # Allow Primary Agent to run bounded, read-only commands
         if tool_name in ["run_command", "default_api:run_command"]:
-            emit({"decision": "deny", "reason": "Attention Dilution Guard: The Primary Agent is forbidden from executing shell commands. You must delegate to a subagent."})
+            emit_deny("Attention Dilution Guard: The Primary Agent is forbidden from executing shell commands. You must delegate to a subagent.")
             return
 
-        # Allow coordination and basic read tools
         ALLOWED_TOOLS = {
             "view_file", "grep_search", "list_dir", "find_by_name", "search_web", "read_url_content",
             "default_api:view_file", "default_api:grep_search", "default_api:list_dir", "default_api:find_by_name", "default_api:search_web", "default_api:read_url_content",
@@ -107,26 +109,14 @@ def main(argv=None, stdin=None, stdout=None):
                 emit({"decision": "allow"})
                 return
 
-            emit({
-                "decision": "deny",
-                "reason": f"Attention Dilution Guard: The Primary Agent is restricted to read-only MCP tools. The tool '{mcp_tool_name}' must be delegated to a subagent."
-            })
+            emit_deny(f"Attention Dilution Guard: The Primary Agent is restricted to read-only MCP tools. The tool '{mcp_tool_name}' must be delegated to a subagent.")
             return
 
-        # Block Primary Agent from direct code execution and file modifications
-        emit({
-            "decision": "deny",
-            "reason": (
-                "Attention Dilution Guard: The Primary Agent is restricted to planning "
-                "and artifact creation. Direct code modification and shell execution must be "
-                "delegated to a subagent."
-            )
-        })
+        emit_deny("Attention Dilution Guard: The Primary Agent is restricted to planning and artifact creation. Direct code modification and shell execution must be delegated to a subagent.")
     except json.JSONDecodeError:
         emit({"decision": "deny"})
     except Exception:
         emit({"decision": "deny"})
-
 
 if __name__ == "__main__":
     main()

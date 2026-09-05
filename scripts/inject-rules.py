@@ -4,7 +4,7 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 import json
 import time
-from common import get_cache_dir
+from common import get_cache_dir, is_subagent
 
 def main(argv=None, stdin=None, stdout=None):
     if argv is None: argv = sys.argv
@@ -43,23 +43,34 @@ def main(argv=None, stdin=None, stdout=None):
 
             import uuid
 
-            # Issue a token for each child subagent
             cache_dir = get_cache_dir()
+            is_sub, current_may_delegate, current_depth = is_subagent(payload)
 
             for sa in subagents:
                 type_name = sa.get("TypeName", "")
-                may_delegate = type_name in ["DeepCoder", "DeepInvestigator"]
+                
+                if is_sub:
+                    child_may_delegate = False
+                    child_depth = 0
+                else:
+                    child_may_delegate = type_name in ["DeepCoder", "DeepInvestigator"]
+                    child_depth = 1 if child_may_delegate else 0
 
                 token = str(uuid.uuid4())
                 try:
                     token_file = os.path.join(cache_dir, f"agy_issued_token_{token}")
                     with open(token_file, "w") as f:
-                        json.dump({"issuer": parent_conv_id, "recipient": None, "may_delegate": may_delegate}, f)
+                        json.dump({
+                            "issuer": parent_conv_id,
+                            "recipient": None,
+                            "may_delegate": child_may_delegate,
+                            "remaining_depth": child_depth
+                        }, f)
                 except Exception:
                     emit({"decision": "deny", "reason": "Attention Guard: Failed to issue cryptographic token to subagent cache."})
                     return
                 
-                injected_text = coord_rules_text if may_delegate else exec_rules_text
+                injected_text = coord_rules_text if child_may_delegate else exec_rules_text
                 injected = ("\n\n--- INJECTED RULES ---\n" + injected_text) if injected_text else ""
                 sa["Prompt"] = f"[ANTIGRAVITY_TOKEN:{token}]\n\n" + sa.get("Prompt", "") + injected
 

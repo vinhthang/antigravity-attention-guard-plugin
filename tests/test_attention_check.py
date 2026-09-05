@@ -56,13 +56,14 @@ class TestSubagentSkip:
         assert result == {"decision": "allow"}
 
 class TestStopRejectionLimit:
-    def test_max_rejections_then_allow(self, tmp_path):
+    def test_max_rejections_then_allow(self, tmp_path, monkeypatch):
         conv_id = f"chk-limit-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
+            {"source": "USER", "type": "USER_INPUT", "content": "hello"},
             {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "I did some work but did not delegate."}
         ])
-
+    
         payload = {
             "fullyIdle": True,
             "modelName": "claude-opus-4.6",
@@ -70,11 +71,17 @@ class TestStopRejectionLimit:
             "transcriptPath": str(transcript),
             "workspacePaths": []
         }
-
+        
+        # Write marker file for turn_id = 1
+        tracker = os.path.join(str(tmp_path), "cache", f"violation_{conv_id}_1")
+        os.makedirs(os.path.dirname(tracker), exist_ok=True)
+        with open(tracker + ".json", "w") as f:
+            json.dump({"turn_id": 1, "transcript_lines": 1}, f)
+    
         for i in range(2):
             result = run_hook(payload)
             assert result.get("decision") == "continue", f"Rejection {i+1} should block"
-
+    
         result = run_hook(payload)
         assert result == {"decision": "allow"}, "Should allow after max rejections"
 
@@ -82,13 +89,14 @@ class TestStopRejectionLimit:
         conv_id = f"chk-delegated-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
+            {"source": "USER", "type": "USER_INPUT", "content": "hello"},
             {
                 "source": "MODEL",
                 "type": "PLANNER_RESPONSE",
                 "tool_calls": [{"name": "invoke_subagent", "args": {}}]
             }
         ])
-
+    
         payload = {
             "fullyIdle": True,
             "modelName": "claude-opus-4.6",
@@ -96,7 +104,12 @@ class TestStopRejectionLimit:
             "transcriptPath": str(transcript),
             "workspacePaths": []
         }
-
+        
+        tracker = os.path.join(str(tmp_path), "cache", f"violation_{conv_id}_1")
+        os.makedirs(os.path.dirname(tracker), exist_ok=True)
+        with open(tracker + ".json", "w") as f:
+            json.dump({"turn_id": 1, "transcript_lines": 1}, f)
+    
         result = run_hook(payload)
         assert result == {"decision": "allow"}
 
@@ -110,7 +123,7 @@ class TestStopRejectionLimit:
                 "tool_calls": [{"name": "invoke_subagent", "args": {}}]
             }
         ])
-
+    
         payload = {
             "fullyIdle": True,
             "modelName": "claude-opus-4.6",
@@ -118,10 +131,37 @@ class TestStopRejectionLimit:
             "transcriptPath": str(transcript),
             "workspacePaths": []
         }
-
+        
+        tracker = os.path.join(str(tmp_path), "cache", f"violation_{conv_id}_1")
+        os.makedirs(os.path.dirname(tracker), exist_ok=True)
+        with open(tracker + ".json", "w") as f:
+            json.dump({"turn_id": 1, "transcript_lines": 1}, f)
+    
         # Should block because the tool call wasn't from MODEL
         for i in range(2):
             result = run_hook(payload)
             assert result.get("decision") == "continue"
 
-
+    def test_flow_review_question_no_dummy(self, tmp_path):
+        # A flow-review question must produce no worker launch
+        # if there is no violation.
+        conv_id = f"chk-flow-{os.getpid()}"
+        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
+        create_transcript(str(transcript), [
+            {"source": "USER", "type": "USER_INPUT", "content": "How does this code work?"},
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "It works by parsing."}
+        ])
+    
+        payload = {
+            "fullyIdle": True,
+            "modelName": "claude-opus-4.6",
+            "conversationId": conv_id,
+            "transcriptPath": str(transcript),
+            "workspacePaths": []
+        }
+        
+        # NO marker file written.
+        
+        result = run_hook(payload)
+        # Should allow immediately because there's no pending violation
+        assert result == {"decision": "allow"}
