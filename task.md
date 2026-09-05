@@ -1,7 +1,8 @@
-# Task Checklist
+# Task
 
-- [x] Verify `.gitignore` contents.
-- [x] Run `git rm -r --cached .venv .coverage`.
-- [x] Commit changes.
-- [x] Push to `origin/main`.
-- [x] Run `git pull` in config directory.
+- [x] Authorize the State Machine Refactor
+- [x] Implement fsm.py
+- [x] Implement ledger.py
+- [x] Implement record-tool-result.py
+- [x] Implement diagnostics.py
+- [x] Rewrite 4 hooks and 22 tests

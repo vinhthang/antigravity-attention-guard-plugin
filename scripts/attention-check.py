@@ -5,40 +5,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 import json
 import time
 from common import is_subagent, get_cache_dir, get_turn_state
+from ledger import Ledger
+from fsm import FSM, Event, State
 
 MAX_STOP_REJECTIONS = 2
-
-def has_valid_handoff_after(transcript_path, start_line):
-    if not transcript_path or not os.path.exists(transcript_path):
-        return False
-    try:
-        valid_invokes = 0
-        with open(transcript_path, "r", encoding="utf-8") as f:
-            for i, line in enumerate(f):
-                if i < start_line:
-                    continue
-                try:
-                    step = json.loads(line)
-                    # Check for MODEL tool call
-                    if step.get("source") == "MODEL" and "tool_calls" in step:
-                        for tc in step["tool_calls"]:
-                            name = tc.get("name", "")
-                            args_str = json.dumps(tc.get("args", {}))
-                            if name in ["invoke_subagent", "default_api:invoke_subagent"]:
-                                # ignore dummy tasks
-                                if "date" not in args_str.lower() and "dummy" not in args_str.lower():
-                                    valid_invokes += 1
-                    # Check for TOOL response indicating failure
-                    if step.get("source") == "TOOL" or step.get("type") == "TOOL_RESPONSE":
-                        line_str = line.lower()
-                        if "invoke_subagent" in line_str and ("error" in line_str or "deny" in line_str or "denied" in line_str or "fail" in line_str):
-                            valid_invokes = max(0, valid_invokes - 1)
-                except Exception:
-                    pass
-        return valid_invokes > 0
-    except Exception:
-        pass
-    return False
 
 def get_rejection_count(tracker):
     count_file = tracker + "_stop_count"
@@ -63,10 +33,21 @@ def reset_rejection_count(tracker):
         try:
             os.remove(count_file)
         except: pass
-    if os.path.exists(tracker + ".json"):
-        try:
-            os.remove(tracker + ".json")
-        except: pass
+
+def get_current_fsm_state(ledger, conv_id, turn_id):
+    fsm = FSM()
+    with ledger._get_connection() as conn:
+        cursor = conn.execute("SELECT type, payload FROM events WHERE event_id LIKE ? ORDER BY created_at ASC", (f"{conv_id}_{turn_id}_%",))
+        for row in cursor:
+            event_type_str = row[0]
+            payload = json.loads(row[1]) if row[1] else {}
+            
+            try:
+                event = Event[event_type_str]
+                fsm.transition(event, payload)
+            except KeyError:
+                pass
+    return fsm.state
 
 def main(argv=None, stdin=None, stdout=None):
     if argv is None:
@@ -85,49 +66,71 @@ def main(argv=None, stdin=None, stdout=None):
         emit({"decision": "allow"})
         return
 
-    if not payload.get("fullyIdle", True):
-        emit({"decision": "allow"})
-        return
-
-    is_sub, _, _ = is_subagent(payload)
-    if is_sub:
-        emit({"decision": "allow"})
-        return
-
+    is_sub, _, _, parent_conv_id, parent_turn_id = is_subagent(payload)
+    ledger = Ledger()
     conv_id = payload.get("conversationId", "unknown")
-    transcript_path = payload.get("transcriptPath", "")
-    turn_id, _ = get_turn_state(transcript_path)
-    
+    turn_id, _ = get_turn_state(payload.get("transcriptPath", ""))
+
+    if is_sub:
+        fully_idle = payload.get("fullyIdle", True)
+        term_reason = payload.get("terminationReason", "model_stop")
+        error = payload.get("error", None)
+        
+        event_type = None
+        if not fully_idle:
+            event_type = "WAITING"
+        elif error:
+            event_type = Event.WORK_TERMINATED_ERROR.name
+        elif term_reason == "max_steps_exceeded":
+            event_type = Event.WORK_TIMED_OUT.name
+        elif fully_idle and term_reason == "model_stop" and not error:
+            event_type = Event.WORK_TERMINATED_OK.name
+            
+        if event_type and parent_conv_id and parent_turn_id:
+            # We record to the parent's ledger so parent FSM can see it
+            ledger.insert_event(parent_conv_id, str(parent_turn_id), "Stop", "0", conv_id, event_type, json.dumps({"child_id": conv_id}))
+            
+        emit({"decision": "allow"})
+        return
+
     tracker = os.path.join(get_cache_dir(), f"violation_{conv_id}_{turn_id}")
-    marker_path = tracker + ".json"
     
-    if not os.path.exists(marker_path):
+    current_state = get_current_fsm_state(ledger, conv_id, turn_id)
+    
+    if current_state in (State.OPEN, State.REVIEWING, State.CLOSED):
+        reset_rejection_count(tracker)
         emit({"decision": "allow"})
         return
         
-    try:
-        with open(marker_path, "r") as f:
-            marker = json.load(f)
-        start_line = marker.get("transcript_lines", 0)
-    except Exception:
-        emit({"decision": "allow"})
-        return
-
-    if has_valid_handoff_after(transcript_path, start_line):
+    if current_state == State.HANDOFF_PENDING:
         reset_rejection_count(tracker)
         emit({"decision": "allow"})
         return
+        
+    if current_state == State.EXECUTION_ACTIVE:
+        if payload.get("fullyIdle", True):
+            # Inconsistent state, recover
+            current_state = State.RECOVERY_REQUIRED
+        else:
+            reset_rejection_count(tracker)
+            emit({"decision": "allow"})
+            return
 
-    rejection_count = get_rejection_count(tracker)
-    if rejection_count >= MAX_STOP_REJECTIONS:
-        reset_rejection_count(tracker)
-        emit({"decision": "allow"})
+    if current_state == State.RECOVERY_REQUIRED:
+        rejection_count = get_rejection_count(tracker)
+        if rejection_count >= MAX_STOP_REJECTIONS:
+            reset_rejection_count(tracker)
+            ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"retries_exhausted": True}))
+            emit({"decision": "allow"})
+            return
+
+        rejection_count = increment_rejection_count(tracker)
+        injected_text = f"Attention Guard Refresh: Remember you are the Primary Agent. Delegate all execution to subagents. (Retry {rejection_count}/{MAX_STOP_REJECTIONS})"
+        
+        emit({"decision": "continue", "reason": injected_text})
         return
 
-    rejection_count = increment_rejection_count(tracker)
-    injected_text = f"Attention Guard Refresh: Remember you are the Primary Agent. Delegate all execution to subagents. (Retry {rejection_count}/{MAX_STOP_REJECTIONS})"
-    
-    emit({"decision": "continue", "reason": injected_text})
+    emit({"decision": "allow"})
 
 if __name__ == "__main__":
     main()

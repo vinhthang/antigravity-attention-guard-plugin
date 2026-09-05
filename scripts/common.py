@@ -2,73 +2,13 @@ import os
 import json
 import re
 import time
-import fcntl
+from ledger import Ledger
 
 def get_cache_dir():
     base = os.environ.get("AGY_APP_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".gemini", "antigravity")
     cache = os.path.join(base, "cache")
     os.makedirs(cache, exist_ok=True)
     return cache
-
-def is_subagent(data):
-    """Determine if the current agent is a subagent using Issued Tokens.
-    Reads only the first 8192 bytes of the transcript to find the token.
-    Validates the token against the issued token cache.
-    """
-    cache_dir = get_cache_dir()
-    try:
-        now_time = time.time()
-        for fname in os.listdir(cache_dir):
-            if fname.startswith("agy_issued_token_"):
-                fpath = os.path.join(cache_dir, fname)
-                if now_time - os.path.getmtime(fpath) > 86400:
-                    os.remove(fpath)
-    except Exception:
-        pass
-
-    transcript_path = data.get("transcriptPath", "")
-    if not transcript_path or not os.path.exists(transcript_path):
-        return False, False, 0
-
-    try:
-        with open(transcript_path, "r", encoding="utf-8") as f:
-            content = f.read(8192)
-
-        conv_id = data.get("conversationId", "unknown")
-        matches = re.finditer(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]', content)
-        now = time.time()
-        for match in matches:
-            token = match.group(1)
-            token_file = os.path.join(get_cache_dir(), f"agy_issued_token_{token}")
-            if os.path.exists(token_file):
-                try:
-                    if now - os.path.getmtime(token_file) > 86400:
-                        os.remove(token_file)
-                        continue
-
-                    with open(token_file, "r+") as f:
-                        fcntl.flock(f, fcntl.LOCK_EX)
-                        try:
-                            t_data = json.load(f)
-                            if t_data.get("issuer") == conv_id:
-                                continue
-
-                            if t_data.get("recipient") is None:
-                                t_data["recipient"] = conv_id
-                                f.seek(0)
-                                json.dump(t_data, f)
-                                f.truncate()
-                                return True, t_data.get("may_delegate", False), t_data.get("remaining_depth", 0)
-                            elif t_data.get("recipient") == conv_id:
-                                return True, t_data.get("may_delegate", False), t_data.get("remaining_depth", 0)
-                        finally:
-                            fcntl.flock(f, fcntl.LOCK_UN)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-    return False, False, 0
 
 def get_turn_state(transcript_path):
     turn_id = 0
@@ -88,3 +28,43 @@ def get_turn_state(transcript_path):
     except Exception:
         pass
     return turn_id, lines_count
+
+def is_subagent(data):
+    """Determine if the current agent is a subagent using the Ledger."""
+    transcript_path = data.get("transcriptPath", "")
+    if not transcript_path or not os.path.exists(transcript_path):
+        return False, False, 0, None, None
+
+    conv_id = data.get("conversationId", "unknown")
+    turn_id, _ = get_turn_state(transcript_path)
+    
+    try:
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            content = f.read(8192)
+
+        matches = re.finditer(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]', content)
+        ledger = Ledger()
+        
+        for match in matches:
+            token = match.group(1)
+            
+            with ledger._get_connection() as conn:
+                cursor = conn.execute("SELECT payload FROM events WHERE type = 'WORK_PREPARED' AND payload LIKE ?", (f'%"{token}"%',))
+                row = cursor.fetchone()
+                if row:
+                    payload_data = json.loads(row[0])
+                    may_delegate = payload_data.get("may_delegate", False)
+                    remaining_depth = payload_data.get("remaining_depth", 0)
+                    parent_conv_id = payload_data.get("parent_conv_id", "unknown")
+                    parent_turn_id = payload_data.get("parent_turn_id", "unknown")
+                    
+                    if ledger.claim_token(token):
+                        ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "WORK_CLAIMED")
+                        ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "RUNNING")
+                        
+                    return True, may_delegate, remaining_depth, parent_conv_id, parent_turn_id
+                    
+    except Exception:
+        pass
+
+    return False, False, 0, None, None

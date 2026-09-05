@@ -8,6 +8,10 @@ import pytest
 import sys
 import importlib.util
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../scripts')))
+from ledger import Ledger
+from fsm import Event
+
 spec = importlib.util.spec_from_file_location(
     "attention_check",
     os.path.join(os.path.dirname(__file__), "../scripts/attention-check.py")
@@ -19,6 +23,8 @@ spec.loader.exec_module(attention_check_mod)
 @pytest.fixture(autouse=True)
 def setup_test_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("AGY_APP_DATA_DIR", str(tmp_path))
+    import ledger
+    importlib.reload(ledger)
 
 def run_hook(payload):
     stdin = io.StringIO(json.dumps(payload))
@@ -33,11 +39,15 @@ def create_transcript(path, entries):
 
 class TestSubagentSkip:
     def test_subagent_with_token_skipped(self, tmp_path):
-        cache_dir = os.path.join(str(tmp_path), "cache")
-        os.makedirs(cache_dir, exist_ok=True)
-        token_file = os.path.join(cache_dir, "agy_issued_token_abc-123")
-        with open(token_file, "w") as f:
-            json.dump({"issuer": "parent", "recipient": None}, f)
+        import ledger
+        importlib.reload(ledger)
+        l = ledger.Ledger()
+        
+        token = "abc-123"
+        with l._get_connection() as conn:
+            conn.execute("INSERT INTO tokens (token_id) VALUES (?)", (token,))
+        payload_data = {"token": token, "may_delegate": False, "remaining_depth": 0, "parent_conv_id": "parent", "parent_turn_id": "1"}
+        l.insert_event("parent", "1", "PreToolUse", "0", token, "WORK_PREPARED", json.dumps(payload_data))
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(
@@ -57,6 +67,9 @@ class TestSubagentSkip:
 
 class TestStopRejectionLimit:
     def test_max_rejections_then_allow(self, tmp_path, monkeypatch):
+        import ledger
+        importlib.reload(ledger)
+        l = ledger.Ledger()
         conv_id = f"chk-limit-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
@@ -72,11 +85,8 @@ class TestStopRejectionLimit:
             "workspacePaths": []
         }
         
-        # Write marker file for turn_id = 1
-        tracker = os.path.join(str(tmp_path), "cache", f"violation_{conv_id}_1")
-        os.makedirs(os.path.dirname(tracker), exist_ok=True)
-        with open(tracker + ".json", "w") as f:
-            json.dump({"turn_id": 1, "transcript_lines": 1}, f)
+        # State: RECOVERY_REQUIRED
+        l.insert_event(conv_id, "1", "PreToolUse", "0", "enforce", Event.PRIMARY_TOOL_DENIED.name, json.dumps({"reason": "blocked"}))
     
         for i in range(2):
             result = run_hook(payload)
@@ -86,6 +96,9 @@ class TestStopRejectionLimit:
         assert result == {"decision": "allow"}, "Should allow after max rejections"
 
     def test_allow_if_delegated(self, tmp_path):
+        import ledger
+        importlib.reload(ledger)
+        l = ledger.Ledger()
         conv_id = f"chk-delegated-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
@@ -105,15 +118,16 @@ class TestStopRejectionLimit:
             "workspacePaths": []
         }
         
-        tracker = os.path.join(str(tmp_path), "cache", f"violation_{conv_id}_1")
-        os.makedirs(os.path.dirname(tracker), exist_ok=True)
-        with open(tracker + ".json", "w") as f:
-            json.dump({"turn_id": 1, "transcript_lines": 1}, f)
+        # We need to simulate HANDOFF_PENDING -> EXECUTION_ACTIVE or just WORK_PREPARED
+        l.insert_event(conv_id, "1", "PreToolUse", "0", "invoke", Event.WORK_PREPARED.name, json.dumps({"tool": "invoke"}))
     
         result = run_hook(payload)
         assert result == {"decision": "allow"}
 
     def test_user_prompt_injection_blocked(self, tmp_path):
+        import ledger
+        importlib.reload(ledger)
+        l = ledger.Ledger()
         conv_id = f"chk-inject-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
@@ -132,19 +146,15 @@ class TestStopRejectionLimit:
             "workspacePaths": []
         }
         
-        tracker = os.path.join(str(tmp_path), "cache", f"violation_{conv_id}_1")
-        os.makedirs(os.path.dirname(tracker), exist_ok=True)
-        with open(tracker + ".json", "w") as f:
-            json.dump({"turn_id": 1, "transcript_lines": 1}, f)
+        # Set state to RECOVERY_REQUIRED to test that injection does NOT bypass the check
+        l.insert_event(conv_id, "1", "PreToolUse", "0", "enforce", Event.PRIMARY_TOOL_DENIED.name, json.dumps({"reason": "blocked"}))
     
-        # Should block because the tool call wasn't from MODEL
+        # Should block because the tool call wasn't from MODEL (we don't emit WORK_PREPARED for USER tools)
         for i in range(2):
             result = run_hook(payload)
             assert result.get("decision") == "continue"
 
     def test_flow_review_question_no_dummy(self, tmp_path):
-        # A flow-review question must produce no worker launch
-        # if there is no violation.
         conv_id = f"chk-flow-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
@@ -160,8 +170,6 @@ class TestStopRejectionLimit:
             "workspacePaths": []
         }
         
-        # NO marker file written.
-        
+        # OPEN state
         result = run_hook(payload)
-        # Should allow immediately because there's no pending violation
         assert result == {"decision": "allow"}

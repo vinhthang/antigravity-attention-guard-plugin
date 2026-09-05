@@ -3,8 +3,10 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 import json
+import uuid
 import time
-from common import get_cache_dir, is_subagent
+from common import get_cache_dir, is_subagent, get_turn_state
+from ledger import Ledger
 
 def main(argv=None, stdin=None, stdout=None):
     if argv is None: argv = sys.argv
@@ -40,11 +42,12 @@ def main(argv=None, stdin=None, stdout=None):
             args = tool_call.get("args", {})
             subagents = args.get("Subagents", [])
             parent_conv_id = payload.get("conversationId", "unknown")
+            step_idx = payload.get("stepIndex", 0)
+            
+            turn_id, _ = get_turn_state(payload.get("transcriptPath", ""))
 
-            import uuid
-
-            cache_dir = get_cache_dir()
-            is_sub, current_may_delegate, current_depth = is_subagent(payload)
+            is_sub, current_may_delegate, current_depth, _, _ = is_subagent(payload)
+            ledger = Ledger()
 
             for sa in subagents:
                 type_name = sa.get("TypeName", "")
@@ -58,14 +61,17 @@ def main(argv=None, stdin=None, stdout=None):
 
                 token = str(uuid.uuid4())
                 try:
-                    token_file = os.path.join(cache_dir, f"agy_issued_token_{token}")
-                    with open(token_file, "w") as f:
-                        json.dump({
-                            "issuer": parent_conv_id,
-                            "recipient": None,
-                            "may_delegate": child_may_delegate,
-                            "remaining_depth": child_depth
-                        }, f)
+                    with ledger._get_connection() as conn:
+                        conn.execute("INSERT INTO tokens (token_id, created_at) VALUES (?, ?)", (token, time.time()))
+                    
+                    payload_data = {
+                        "token": token,
+                        "may_delegate": child_may_delegate,
+                        "remaining_depth": child_depth,
+                        "parent_conv_id": parent_conv_id,
+                        "parent_turn_id": turn_id
+                    }
+                    ledger.insert_event(parent_conv_id, str(turn_id), "PreToolUse", str(step_idx), token, "WORK_PREPARED", json.dumps(payload_data))
                 except Exception:
                     emit({"decision": "deny", "reason": "Attention Guard: Failed to issue cryptographic token to subagent cache."})
                     return

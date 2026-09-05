@@ -6,6 +6,9 @@ import importlib.util
 import json
 import pytest
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../scripts')))
+from ledger import Ledger
+
 spec = importlib.util.spec_from_file_location(
     "inject_rules",
     os.path.join(os.path.dirname(__file__), "../scripts/inject-rules.py")
@@ -17,14 +20,14 @@ spec.loader.exec_module(inject_mod)
 @pytest.fixture(autouse=True)
 def setup_test_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("AGY_APP_DATA_DIR", str(tmp_path))
-
+    import ledger
+    importlib.reload(ledger)
 
 def run_hook(payload):
     stdin = io.StringIO(json.dumps(payload))
     stdout = io.StringIO()
     inject_mod.main(argv=["inject-rules.py"], stdin=stdin, stdout=stdout)
     return json.loads(stdout.getvalue().strip())
-
 
 class TestRuleInjection:
     def test_injects_rules_into_subagent_prompt(self):
@@ -63,9 +66,15 @@ class TestRuleInjection:
         assert match
         token = match.group(1)
 
-        cache_dir = os.path.join(str(tmp_path), "cache")
-        token_file = os.path.join(cache_dir, f"agy_issued_token_{token}")
-        assert os.path.exists(token_file)
+        import ledger
+        importlib.reload(ledger)
+        l = ledger.Ledger()
+        with l._get_connection() as conn:
+            cursor = conn.execute("SELECT * FROM tokens WHERE token_id = ?", (token,))
+            assert cursor.fetchone() is not None
+            
+            cursor = conn.execute("SELECT * FROM events WHERE type = 'WORK_PREPARED' AND payload LIKE ?", (f'%"{token}"%',))
+            assert cursor.fetchone() is not None
 
     def test_unique_tokens_in_batch(self):
         result = run_hook({
@@ -98,16 +107,18 @@ class TestRuleInjection:
         })
         assert result["decision"] == "allow"
         assert "overwrite" not in result
+
 def test_coordinator_creates_leaf_worker(tmp_path):
     import os, json, re
-    from test_inject_rules import run_hook
-    # Setup parent token as a coordinator (may_delegate=True, remaining_depth=1)
-    cache_dir = os.path.join(str(tmp_path), "cache")
-    os.makedirs(cache_dir, exist_ok=True)
+    import ledger
+    importlib.reload(ledger)
+    l = ledger.Ledger()
+    
     parent_token = "a1b2c3d4-1234"
-    token_file = os.path.join(cache_dir, f"agy_issued_token_{parent_token}")
-    with open(token_file, "w") as f:
-        json.dump({"issuer": "root", "recipient": "coord-conv", "may_delegate": True, "remaining_depth": 1}, f)
+    with l._get_connection() as conn:
+        conn.execute("INSERT INTO tokens (token_id) VALUES (?)", (parent_token,))
+    payload_data = {"token": parent_token, "may_delegate": True, "remaining_depth": 1, "parent_conv_id": "root", "parent_turn_id": "1"}
+    l.insert_event("root", "1", "PreToolUse", "0", parent_token, "WORK_PREPARED", json.dumps(payload_data))
 
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text(
@@ -129,8 +140,11 @@ def test_coordinator_creates_leaf_worker(tmp_path):
     match = re.search(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]', subagents[0]["Prompt"])
     child_token = match.group(1)
 
-    with open(os.path.join(cache_dir, f"agy_issued_token_{child_token}"), "r") as f:
-        child_data = json.load(f)
+    with l._get_connection() as conn:
+        cursor = conn.execute("SELECT payload FROM events WHERE type = 'WORK_PREPARED' AND payload LIKE ?", (f'%"{child_token}"%',))
+        row = cursor.fetchone()
+        assert row is not None
+        child_data = json.loads(row[0])
     
     assert child_data["may_delegate"] is False
     assert child_data["remaining_depth"] == 0

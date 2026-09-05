@@ -1,18 +1,23 @@
 import os
 import sys
+import json
+import importlib.util
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts')))
 from common import is_subagent
-import json
 
 def test_large_prompt_token_present(tmp_path):
-    cache_dir = os.path.join(str(tmp_path), "cache")
     os.environ["AGY_APP_DATA_DIR"] = str(tmp_path)
-    os.makedirs(cache_dir, exist_ok=True)
+    
+    import ledger
+    importlib.reload(ledger)
+    l = ledger.Ledger()
 
     token = "1234-abcd"
-    token_file = os.path.join(cache_dir, f"agy_issued_token_{token}")
-    with open(token_file, "w") as f:
-        json.dump({"issuer": "parent", "recipient": None}, f)
+    with l._get_connection() as conn:
+        conn.execute("INSERT INTO tokens (token_id) VALUES (?)", (token,))
+    payload_data = {"token": token, "may_delegate": False, "remaining_depth": 0, "parent_conv_id": "parent", "parent_turn_id": "1"}
+    l.insert_event("parent", "1", "PreToolUse", "0", token, "WORK_PREPARED", json.dumps(payload_data))
 
     large_prompt = "A" * 9000
     transcript = tmp_path / "transcript.jsonl"
@@ -20,5 +25,5 @@ def test_large_prompt_token_present(tmp_path):
         f'{{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "[ANTIGRAVITY_TOKEN:{token}]\\n\\n{large_prompt}"}}\n'
     )
 
-    data = {"transcriptPath": str(transcript), "modelName": "claude-opus-4.6"}
-    assert is_subagent(data) == (True, False, 0)
+    data = {"transcriptPath": str(transcript), "modelName": "claude-opus-4.6", "conversationId": "child"}
+    assert is_subagent(data) == (True, False, 0, "parent", "1")

@@ -6,6 +6,8 @@ import json
 import re
 import time
 from common import is_subagent, get_cache_dir, get_turn_state
+from ledger import Ledger
+from fsm import Event
 
 MCP_READ_ALLOWLIST = {
     ("codegraph", "codegraph_search"), ("codegraph", "codegraph_context"),
@@ -52,15 +54,15 @@ def main(argv=None, stdin=None, stdout=None):
                 transcript_path = data.get("transcriptPath", "")
                 turn_id, lines = get_turn_state(transcript_path)
                 conv_id = data.get("conversationId", "unknown")
-                marker_path = os.path.join(get_cache_dir(), f"violation_{conv_id}_{turn_id}.json")
-                if not os.path.exists(marker_path):
-                    with open(marker_path, "w") as f:
-                        json.dump({"turn_id": turn_id, "transcript_lines": lines}, f)
+                step_idx = data.get("stepIndex", 0)
+                
+                ledger = Ledger()
+                ledger.insert_event(conv_id, str(turn_id), "PreToolUse", str(step_idx), "enforce", Event.PRIMARY_TOOL_DENIED.name, json.dumps({"reason": reason}))
             except Exception:
                 pass
             emit({"decision": "deny", "reason": reason})
 
-        is_sub, may_delegate, remaining_depth = is_subagent(data)
+        is_sub, may_delegate, remaining_depth, _, _ = is_subagent(data)
         if is_sub:
             tool_call = data.get("toolCall", {})
             tool_name = tool_call.get("name", "")
