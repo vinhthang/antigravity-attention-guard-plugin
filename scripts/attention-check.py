@@ -12,7 +12,7 @@ def has_valid_handoff_after(transcript_path, start_line):
     if not transcript_path or not os.path.exists(transcript_path):
         return False
     try:
-        found_invoke = False
+        valid_invokes = 0
         with open(transcript_path, "r", encoding="utf-8") as f:
             for i, line in enumerate(f):
                 if i < start_line:
@@ -27,15 +27,15 @@ def has_valid_handoff_after(transcript_path, start_line):
                             if name in ["invoke_subagent", "default_api:invoke_subagent"]:
                                 # ignore dummy tasks
                                 if "date" not in args_str.lower() and "dummy" not in args_str.lower():
-                                    found_invoke = True
+                                    valid_invokes += 1
                     # Check for TOOL response indicating failure
                     if step.get("source") == "TOOL" or step.get("type") == "TOOL_RESPONSE":
                         line_str = line.lower()
-                        if "invoke_subagent" in line_str and "error" in line_str:
-                            found_invoke = False
+                        if "invoke_subagent" in line_str and ("error" in line_str or "deny" in line_str or "denied" in line_str or "fail" in line_str):
+                            valid_invokes = max(0, valid_invokes - 1)
                 except Exception:
                     pass
-        return found_invoke
+        return valid_invokes > 0
     except Exception:
         pass
     return False
