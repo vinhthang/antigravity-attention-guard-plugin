@@ -53,7 +53,7 @@ class TestSubagentDetection:
             '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do the task\\n\\n[ANTIGRAVITY_TOKEN:1234-abcd]"}\n'
         )
         data = {"transcriptPath": str(transcript), "modelName": "claude-opus-4.6"}
-        assert is_subagent(data) is True
+        assert is_subagent(data) == (True, False)
 
     def test_subagent_with_invalid_token_blocked(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
@@ -61,7 +61,7 @@ class TestSubagentDetection:
             '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do the task\\n\\n[ANTIGRAVITY_TOKEN:1234-abcd]"}\n'
         )
         data = {"transcriptPath": str(transcript), "modelName": "claude-opus-4.6"}
-        assert is_subagent(data) is False
+        assert is_subagent(data) == (False, False)
 
 
 class TestArtifactPath:

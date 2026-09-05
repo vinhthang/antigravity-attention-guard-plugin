@@ -20,6 +20,5 @@ def test_large_prompt_token_present(tmp_path):
         f'{{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "[ANTIGRAVITY_TOKEN:{token}]\\n\\n{large_prompt}"}}\n'
     )
 
-    data = {"transcriptPath": str(transcript)}
-    assert is_subagent(data) is True
-
+    data = {"transcriptPath": str(transcript), "modelName": "claude-opus-4.6"}
+    assert is_subagent(data) == (True, False)

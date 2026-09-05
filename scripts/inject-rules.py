@@ -22,16 +22,18 @@ def main(argv=None, stdin=None, stdout=None):
 
         payload = json.loads(input_data)
 
-        # Read the plugin's own AGENTS.md
-        agents_rule = os.path.join(os.path.dirname(__file__), "..", "rules", "EXECUTOR.md")
-        agents_rule = os.path.abspath(agents_rule)
+        executor_rule = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "rules", "EXECUTOR.md"))
+        coordinator_rule = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "rules", "COORDINATOR.md"))
 
-        rules_text = ""
-        if os.path.exists(agents_rule):
-            with open(agents_rule, "r") as f:
-                rules_text = f.read()
+        exec_rules_text = ""
+        if os.path.exists(executor_rule):
+            with open(executor_rule, "r") as f:
+                exec_rules_text = f.read()
 
-        injected = ("\n\n--- INJECTED RULES ---\n" + rules_text) if rules_text else ""
+        coord_rules_text = ""
+        if os.path.exists(coordinator_rule):
+            with open(coordinator_rule, "r") as f:
+                coord_rules_text = f.read()
 
         tool_call = payload.get("toolCall", {})
         if tool_call.get("name") == "invoke_subagent":
@@ -45,14 +47,20 @@ def main(argv=None, stdin=None, stdout=None):
             cache_dir = get_cache_dir()
 
             for sa in subagents:
+                type_name = sa.get("TypeName", "")
+                may_delegate = type_name in ["DeepCoder", "DeepInvestigator"]
+
                 token = str(uuid.uuid4())
                 try:
                     token_file = os.path.join(cache_dir, f"agy_issued_token_{token}")
                     with open(token_file, "w") as f:
-                        json.dump({"issuer": parent_conv_id, "recipient": None}, f)
+                        json.dump({"issuer": parent_conv_id, "recipient": None, "may_delegate": may_delegate}, f)
                 except Exception:
                     emit({"decision": "deny", "reason": "Attention Guard: Failed to issue cryptographic token to subagent cache."})
                     return
+                
+                injected_text = coord_rules_text if may_delegate else exec_rules_text
+                injected = ("\n\n--- INJECTED RULES ---\n" + injected_text) if injected_text else ""
                 sa["Prompt"] = f"[ANTIGRAVITY_TOKEN:{token}]\n\n" + sa.get("Prompt", "") + injected
 
             emit({

@@ -73,7 +73,8 @@ def main(argv=None, stdin=None, stdout=None):
         emit({"decision": "allow"})
         return
 
-    if is_subagent(payload):
+    is_sub, _ = is_subagent(payload)
+    if is_sub:
         emit({"decision": "allow"})
         return
 
