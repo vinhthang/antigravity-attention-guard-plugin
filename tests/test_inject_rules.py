@@ -72,7 +72,7 @@ class TestRuleInjection:
         with l._get_connection() as conn:
             cursor = conn.execute("SELECT * FROM tokens WHERE token_id = ?", (token,))
             assert cursor.fetchone() is not None
-            
+
             cursor = conn.execute("SELECT * FROM events WHERE type = 'WORK_PREPARED' AND payload LIKE ?", (f'%"{token}"%',))
             assert cursor.fetchone() is not None
 
@@ -113,7 +113,7 @@ def test_coordinator_creates_leaf_worker(tmp_path):
     import ledger
     importlib.reload(ledger)
     l = ledger.Ledger()
-    
+
     parent_token = "a1b2c3d4-1234"
     with l._get_connection() as conn:
         conn.execute("INSERT INTO tokens (token_id) VALUES (?)", (parent_token,))
@@ -135,7 +135,7 @@ def test_coordinator_creates_leaf_worker(tmp_path):
             }
         }
     })
-    
+
     subagents = result["overwrite"]["Subagents"]
     match = re.search(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]', subagents[0]["Prompt"])
     child_token = match.group(1)
@@ -145,6 +145,6 @@ def test_coordinator_creates_leaf_worker(tmp_path):
         row = cursor.fetchone()
         assert row is not None
         child_data = json.loads(row[0])
-    
+
     assert child_data["may_delegate"] is False
     assert child_data["remaining_depth"] == 0

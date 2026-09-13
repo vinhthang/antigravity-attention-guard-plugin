@@ -8,7 +8,7 @@ from common import is_subagent
 
 def test_large_prompt_token_present(tmp_path):
     os.environ["AGY_APP_DATA_DIR"] = str(tmp_path)
-    
+
     import ledger
     importlib.reload(ledger)
     l = ledger.Ledger()

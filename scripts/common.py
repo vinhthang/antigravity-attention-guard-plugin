@@ -1,7 +1,6 @@
 import os
 import json
 import re
-import time
 from ledger import Ledger
 
 def get_cache_dir():
@@ -18,19 +17,19 @@ def get_turn_state(transcript_path):
     try:
         with open(transcript_path, "r", encoding="utf-8") as f:
             for line in f:
-                lines_count += 1
-                try:
-                    step = json.loads(line)
-                    if str(step.get("source", "")).startswith("USER"):
-                        turn_id += 1
-                except Exception:
-                    pass
+                if line.strip():
+                    lines_count += 1
+                    try:
+                        step = json.loads(line)
+                        if str(step.get("source", "")).startswith("USER") and step.get("type") == "USER_INPUT":
+                            turn_id = step.get("step_index", turn_id)
+                    except Exception:
+                        pass
     except Exception:
         pass
     return turn_id, lines_count
 
 def is_subagent(data):
-    """Determine if the current agent is a subagent using the Ledger."""
     transcript_path = data.get("transcriptPath", "")
     if not transcript_path or not os.path.exists(transcript_path):
         return False, False, 0, None, None
@@ -58,12 +57,16 @@ def is_subagent(data):
                     parent_conv_id = payload_data.get("parent_conv_id", "unknown")
                     parent_turn_id = payload_data.get("parent_turn_id", "unknown")
                     
-                    if ledger.claim_token(token):
+                    if ledger.claim_token(token, conv_id):
                         ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "WORK_CLAIMED")
                         ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "RUNNING")
-                        
-                    return True, may_delegate, remaining_depth, parent_conv_id, parent_turn_id
-                    
+                        return True, may_delegate, remaining_depth, parent_conv_id, parent_turn_id
+            
+            # Legacy fallback
+            legacy_file = os.path.join(get_cache_dir(), f"agy_issued_token_{token}")
+            if os.path.exists(legacy_file):
+                return True, False, 0, None, None
+
     except Exception:
         pass
 

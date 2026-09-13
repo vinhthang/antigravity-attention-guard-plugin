@@ -51,7 +51,7 @@ class TestSubagentSkip:
 
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(
-            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do task\\n\\n[ANTIGRAVITY_TOKEN:abc-123]"}\n'
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do task\\n\\n[ANTIGRAVITY_TOKEN:abc-123]", "step_index": 1}\n'
         )
         result = run_hook({
             "fullyIdle": True,
@@ -73,7 +73,7 @@ class TestStopRejectionLimit:
         conv_id = f"chk-limit-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
-            {"source": "USER", "type": "USER_INPUT", "content": "hello"},
+            {"source": "USER", "type": "USER_INPUT", "content": "hello", "step_index": 1},
             {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "I did some work but did not delegate."}
         ])
     
@@ -102,11 +102,12 @@ class TestStopRejectionLimit:
         conv_id = f"chk-delegated-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
-            {"source": "USER", "type": "USER_INPUT", "content": "hello"},
+            {"source": "USER", "type": "USER_INPUT", "content": "hello", "step_index": 1},
             {
                 "source": "MODEL",
                 "type": "PLANNER_RESPONSE",
-                "tool_calls": [{"name": "invoke_subagent", "args": {}}]
+                "tool_calls": [{"name": "invoke_subagent", "args": {}}],
+                "step_index": 1
             }
         ])
     
@@ -134,7 +135,8 @@ class TestStopRejectionLimit:
             {
                 "source": "USER",
                 "type": "USER_INPUT",
-                "tool_calls": [{"name": "invoke_subagent", "args": {}}]
+                "tool_calls": [{"name": "invoke_subagent", "args": {}}],
+                "step_index": 1
             }
         ])
     
@@ -158,7 +160,7 @@ class TestStopRejectionLimit:
         conv_id = f"chk-flow-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
-            {"source": "USER", "type": "USER_INPUT", "content": "How does this code work?"},
+            {"source": "USER", "type": "USER_INPUT", "content": "How does this code work?", "step_index": 1},
             {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "It works by parsing."}
         ])
     

@@ -1,30 +1,41 @@
 <rule name="agent-delegation">
 <description>
-Enforces the two-phase agent lifecycle, subagent model selection, escalation protocol, and strict JSON handoff communication.
+Enforces Ray Dalio's 5-Step Process (Clear Goals, Problem Intolerance, Root Cause Diagnosis, Deterministic Design, Execution Accountability) across the agent lifecycle.
 </description>
 
 <constraints>
-- **Phase 1 (Planning / Primary Agent):** High-level reasoning. Analyze risks and define boundaries. **Mandatory Risk Evaluation:** You MUST autonomously evaluate the architectural blast radius. If the task involves core infrastructure, database connections, concurrency, or synchronous platform hooks, you MUST self-activate the `superpowers` skill to perform a deep audit before proceeding. For complex tasks, create `implementation_plan.md` and update `task.md` with a checklist (`- [ ]`). No code changes yet.
-- **Phase 2 (Execution / Subagents):** Low-level deterministic execution. Delegate code edits, terminal commands, and checks to subagents based on the Model Selection Framework. Mark `task.md` done (`- [x]`) if applicable. Phase 2 is conditional. Planning, explanation, review, questions, and final judgment may complete entirely in Phase 1. Never create no-op work solely to satisfy Attention Guard.
-- If a `flash` subagent encounters an unexpected failure (e.g., broken build, test failure), it MUST NOT attempt to fix it blindly. It must stop and report back immediately.
-- Subagent responses via `send_message` MUST be valid JSON. No conversational fluff.
+- **Step 1: Set Clear Goals (Phase 1 / Primary Agent)**: You MUST define falsifiable acceptance criteria—including exact automated verification commands and expected exit states—before any execution subagents are dispatched.
+- **Step 4: Deterministic Design & Human Gate**: Author `implementation_plan.md` and track checklists in `task.md` (`- [ ]`). Execution is strictly gated behind explicit human approval ("Proceed"). No code mutations in Phase 1.
+- **Step 2: Identify & Don't Tolerate Problems (Phase 2 / Subagents)**: Strictly adhere to `rules/no-error-suppression.md`. Zero error suppression, no bare `pass`, and no silent failure swallows. Any command failure or assertion break is a structural blocker.
+- **Step 3: Root Cause Diagnosis Gate (Escalation Protocol)**:
+  - When an executor subagent encounters a failure, the Primary Agent MUST dispatch a `pro` subagent as a **Diagnostician**.
+  - **The Diagnostician is strictly read-only.** It is forbidden from modifying code or running state-altering commands.
+  - The Diagnostician MUST isolate the proximate cause (e.g. traceback line) from the root cause (flawed assumption, race condition, data contract mismatch).
+  - Maximum 3 escalation attempts. If `escalation_counter >= 3` or diagnosis is inconclusive, stop autonomous looping and escalate to the human user.
+- **Step 5: Push Through to Results (Execution Accountability)**:
+  - Subagents MUST return strict, valid JSON conforming to role schemas in `schemas/`.
+  - Every payload MUST include an immutable `execution_attempt_id` (UUID format).
+  - Executor summaries MUST NOT exceed 1200 characters.
 </constraints>
 
 <instructions>
 ### 1. Subagent Model Selection Framework
-- **`pro` (Maximum Reasoning):** Use for tasks requiring high autonomy, significant net-new logic, deep refactoring, or complex tools/infrastructure debugging (e.g., SSH, k3s).
-- **`flash` (Mechanical Execution):** Use for tasks where the "thinking" is already done in the plan. Applying targeted diffs, running standard test suites, or formatting.
-- **`flash_lite` (Read-Only):** Reserve strictly for non-mutating research, simple file reading, or grep searches.
+- **`pro` (Maximum Reasoning)**: Reserved for read-only Root Cause Diagnosis, complex architecture investigations, and workstream Coordination.
+- **`flash` (Mechanical Execution)**: Used for deterministic execution where planning is already completed (applying explicit diffs, running tests, formatting).
+- **`flash_lite` (Read-Only Research)**: Reserved for non-mutating searches, grep lookups, and reading documentation.
 
-### 2. Escalation Protocol
-- The Primary Agent will spawn a `pro` subagent to investigate and debug failures reported by `flash` subagents.
+### 2. Escalation Protocol & State Machine
+1. On executor failure, increment `escalation_counter` (keyed by unique `execution_attempt_id`).
+2. Dispatch a `pro` Diagnostician with read-only tools to investigate evidence and produce a structured diagnosis payload (`schemas/diagnostician-payload.json`).
+3. If diagnosis is determined and `escalation_counter < 3`, amend the implementation plan in Phase 1 and seek human approval before re-executing.
+4. If `escalation_counter >= 3` or diagnosis is inconclusive, transition directly to human escalation. Reset counter to 0 only upon explicit human guidance.
 
-### 3. Subagent Communication
-- Required fields: `{"status": "completed|failed", "summary": "..."}`. Add `files_modified`, `test_results`, or `error` as needed.
+### 3. Subagent Liveness Tracking
+- When spawning subagents, the Primary Agent MUST ALWAYS arm a 300s liveness timer via `schedule(DurationSeconds=300, TimerCondition="any")`.
+- When a subagent message arrives, immediately kill the active timer task.
+- If the timer fires and the subagent hasn't reported, query `manage_subagents(Action="list")` and terminate hung processes.
+
 ### 4. Subagent Termination Cleanup
-- If the Primary Agent manually kills a child subagent using the `manage_subagents` tool, it MUST explicitly handle the parent subagent that is stuck waiting. The Primary Agent must either kill the parent subagent as well, or use `send_message` to notify the parent of the child's termination so the parent can exit cleanly.
-
-### 5. Subagent Liveness Tracking
-- When spawning subagents, the Primary Agent MUST ALWAYS use the `schedule` tool to set a liveness timer (e.g., DurationSeconds=300) with `TimerCondition: any`. This prevents the Primary Agent from sleeping indefinitely if a subagent hangs. If the timer fires and the subagent hasn't replied, the Primary Agent must investigate using the `manage_subagents` tool.
+- If the Primary Agent kills a child subagent, it must handle dependent subagents cleanly and avoid orphaned processes.
 </instructions>
 </rule>

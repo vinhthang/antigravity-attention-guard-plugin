@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExecutorPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["execution_attempt_id", "status", "summary"],
+  "properties": {
+    "execution_attempt_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "failed"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 1200
+    },
+    "files_modified": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "test_results": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "failed", "total", "command_executed"],
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 },
+        "command_executed": { "type": "string" }
+      }
+    },
+    "error_details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failure_kind", "diagnostic_message"],
+      "properties": {
+        "failure_kind": {
+          "type": "string",
+          "enum": ["SHELL_NON_ZERO_EXIT", "PAYLOAD_SCHEMA_VIOLATION", "COMMAND_POLICY_VIOLATION", "LIVENESS_TIMEOUT", "SYSTEM_SIGNAL", "ASSERTION_FAILURE"]
+        },
+        "diagnostic_message": { "type": "string", "minLength": 5 },
+        "failing_command": { "type": "string" },
+        "exit_code": { "type": "integer" },
+        "stderr_summary": { "type": "string" },
+        "signal_name": { "type": "string" }
+      }
+    }
+  },
+  "if": {
+    "properties": { "status": { "const": "completed" } }
+  },
+  "then": {
+    "required": ["files_modified", "test_results"],
+    "properties": {
+      "error_details": false,
+      "test_results": {
+        "properties": { "failed": { "const": 0 } }
+      }
+    }
+  },
+  "else": {
+    "required": ["error_details"]
+  }
+}

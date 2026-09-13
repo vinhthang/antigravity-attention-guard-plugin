@@ -29,11 +29,11 @@ def setup_test_cache(tmp_path, monkeypatch):
     # Actually wait, Ledger sets db_path=DB_PATH at module load.
     # Let's monkeypatch Ledger.__init__ to force use of the tmp_path.
     db_path = os.path.join(str(tmp_path), "attention_guard.db")
-    
+
     # We also need to reload ledger to pick up the env var
     import ledger
     importlib.reload(ledger)
-    
+
 def run_hook(payload):
     stdin = io.StringIO(json.dumps(payload))
     stdout = io.StringIO()
@@ -56,7 +56,7 @@ class TestSubagentDetection:
         import ledger
         importlib.reload(ledger)
         l = ledger.Ledger()
-        
+
         token = "1234-abcd"
         with l._get_connection() as conn:
             conn.execute("INSERT INTO tokens (token_id) VALUES (?)", (token,))
@@ -105,7 +105,7 @@ class TestGenerateImageAllowed:
         import ledger
         importlib.reload(ledger)
         l = ledger.Ledger()
-        
+
         token = "1234-abcd"
         with l._get_connection() as conn:
             conn.execute("INSERT INTO tokens (token_id) VALUES (?)", (token,))
@@ -128,7 +128,7 @@ class TestCoordinatorDelegation:
         import ledger
         importlib.reload(ledger)
         l = ledger.Ledger()
-        
+
         token = "a1b2c3d4-4321"
         with l._get_connection() as conn:
             conn.execute("INSERT INTO tokens (token_id) VALUES (?)", (token,))
