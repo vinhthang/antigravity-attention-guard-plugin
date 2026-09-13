@@ -36,7 +36,7 @@ def main():
         event_id, ev_type, payload_str, created_at = row
         payload = json.loads(payload_str) if payload_str else {}
         try: fsm.transition(Event[ev_type], payload)
-        except KeyError: pass
+        except KeyError as exc: sys.stderr.write(f"Warning: Unknown event {ev_type}: {exc}\n")
         if ev_type == "WORK_PREPARED":
             workers.add(payload.get("token"))
             max_depth = max(max_depth, payload.get("remaining_depth", 0))

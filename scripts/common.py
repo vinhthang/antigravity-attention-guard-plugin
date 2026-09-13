@@ -1,3 +1,4 @@
+import sys
 import os
 import json
 import re
@@ -23,10 +24,10 @@ def get_turn_state(transcript_path):
                         step = json.loads(line)
                         if str(step.get("source", "")).startswith("USER") and step.get("type") == "USER_INPUT":
                             turn_id = step.get("step_index", turn_id)
-                    except Exception:
-                        pass
-    except Exception:
-        pass
+                    except Exception as exc:
+                        sys.stderr.write(f"Warning: {exc}\n")
+    except Exception as exc:
+        sys.stderr.write(f"Warning: {exc}\n")
     return turn_id, lines_count
 
 def is_subagent(data):
@@ -38,15 +39,27 @@ def is_subagent(data):
     turn_id, _ = get_turn_state(transcript_path)
     
     try:
+        tokens = []
+        token_pattern = re.compile(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]')
         with open(transcript_path, "r", encoding="utf-8") as f:
-            content = f.read(8192)
+            for line in f:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                try:
+                    step = json.loads(line_str)
+                    if step.get("type") == "USER_INPUT":
+                        content = step.get("content", "")
+                        for match in token_pattern.finditer(content):
+                            tok = match.group(1)
+                            if tok not in tokens:
+                                tokens.append(tok)
+                        break
+                except Exception:
+                    break
 
-        matches = re.finditer(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]', content)
         ledger = Ledger()
-        
-        for match in matches:
-            token = match.group(1)
-            
+        for token in tokens:
             with ledger._get_connection() as conn:
                 cursor = conn.execute("SELECT payload FROM events WHERE type = 'WORK_PREPARED' AND payload LIKE ?", (f'%"{token}"%',))
                 row = cursor.fetchone()
@@ -56,18 +69,17 @@ def is_subagent(data):
                     remaining_depth = payload_data.get("remaining_depth", 0)
                     parent_conv_id = payload_data.get("parent_conv_id", "unknown")
                     parent_turn_id = payload_data.get("parent_turn_id", "unknown")
-                    
+
+                    if conv_id == parent_conv_id:
+                        continue
+
                     if ledger.claim_token(token, conv_id):
                         ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "WORK_CLAIMED")
                         ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "RUNNING")
                         return True, may_delegate, remaining_depth, parent_conv_id, parent_turn_id
-            
-            # Legacy fallback
-            legacy_file = os.path.join(get_cache_dir(), f"agy_issued_token_{token}")
-            if os.path.exists(legacy_file):
-                return True, False, 0, None, None
 
-    except Exception:
-        pass
+
+    except Exception as exc:
+        sys.stderr.write(f"Error in is_subagent: {exc}\n")
 
     return False, False, 0, None, None

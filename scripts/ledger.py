@@ -31,16 +31,18 @@ class Ledger:
                 CREATE TABLE IF NOT EXISTS events (event_id TEXT PRIMARY KEY, type TEXT, payload TEXT, created_at REAL);
                 CREATE TABLE IF NOT EXISTS work_items (work_id TEXT PRIMARY KEY, status TEXT, created_at REAL, parent_conv_id TEXT, parent_turn_id TEXT, step_idx TEXT);
             ''')
-            try: conn.execute("ALTER TABLE tokens ADD COLUMN claimed_by TEXT")
-            except sqlite3.OperationalError: pass
-            try: conn.execute("ALTER TABLE work_items ADD COLUMN parent_conv_id TEXT")
-            except sqlite3.OperationalError: pass
-            try: conn.execute("ALTER TABLE work_items ADD COLUMN parent_turn_id TEXT")
-            except sqlite3.OperationalError: pass
-            try: conn.execute("ALTER TABLE work_items ADD COLUMN step_idx TEXT")
-            except sqlite3.OperationalError: pass
-            try: conn.execute("ALTER TABLE work_items ADD COLUMN updated_at REAL")
-            except sqlite3.OperationalError: pass
+            for alter_stmt in [
+                "ALTER TABLE tokens ADD COLUMN claimed_by TEXT",
+                "ALTER TABLE work_items ADD COLUMN parent_conv_id TEXT",
+                "ALTER TABLE work_items ADD COLUMN parent_turn_id TEXT",
+                "ALTER TABLE work_items ADD COLUMN step_idx TEXT",
+                "ALTER TABLE work_items ADD COLUMN updated_at REAL"
+            ]:
+                try:
+                    conn.execute(alter_stmt)
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
 
     def _prune_opportunistically(self):
         cutoff = time.time() - (48 * 3600)

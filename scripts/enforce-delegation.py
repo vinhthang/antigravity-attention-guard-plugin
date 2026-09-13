@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from common import is_subagent, get_cache_dir, get_turn_state
 from ledger import Ledger
 from fsm import Event
+from command_validator import validate_command
 
 MCP_READ_ALLOWLIST = {
     ("codegraph", "codegraph_search"), ("codegraph", "codegraph_context"),
@@ -38,7 +39,8 @@ def main(argv=None, stdin=None, stdout=None):
             stdout.write(json.dumps(data) + "\n")
     try:
         raw_payload = stdin.read()
-        if not raw_payload or not raw_payload.strip(): return emit({"decision": "allow"})
+        if not raw_payload or not raw_payload.strip():
+            return emit({"decision": "deny", "reason": "Empty input payload"})
         data = json.loads(raw_payload)
 
         def emit_deny(reason):
@@ -47,20 +49,27 @@ def main(argv=None, stdin=None, stdout=None):
                 conv_id = data.get("conversationId", "unknown")
                 step_idx = data.get("stepIdx", 0)
                 Ledger().insert_event(conv_id, str(turn_id), "PreToolUse", str(step_idx), "enforce", Event.PRIMARY_TOOL_DENIED.name, json.dumps({"reason": reason}))
-            except Exception: pass
+            except Exception as exc:
+                sys.stderr.write(f"Warning: {exc}\n")
             emit({"decision": "deny", "reason": reason})
 
         is_sub, may_delegate, remaining_depth, _, _ = is_subagent(data)
-        if is_sub:
-            tool_name = data.get("toolCall", {}).get("name", "")
-            if tool_name in ["invoke_subagent", "manage_subagents", "default_api:invoke_subagent", "default_api:manage_subagents"]:
-                if not may_delegate or remaining_depth <= 0:
-                    return emit_deny("Attention Dilution Guard: Subagents are forbidden from delegating tasks further. Do not invoke or manage subagents.")
-            return emit({"decision": "allow"})
-
         tool_call = data.get("toolCall", {})
         tool_name = tool_call.get("name", "")
         args = tool_call.get("args", {})
+
+        if is_sub:
+            if tool_name in ["invoke_subagent", "manage_subagents", "default_api:invoke_subagent", "default_api:manage_subagents"]:
+                if not may_delegate or remaining_depth <= 0:
+                    return emit_deny("Attention Dilution Guard: Subagents are forbidden from delegating tasks further. Do not invoke or manage subagents.")
+            if tool_name in ["run_command", "default_api:run_command"]:
+                cmd = args.get("CommandLine", "")
+                cwd = args.get("Cwd", "") or os.getcwd()
+                valid, err = validate_command(cmd, workspace_root=cwd)
+                if not valid:
+                    return emit_deny(f"Attention Guard Command Policy Violation: {err}")
+            return emit({"decision": "allow"})
+
         if data.get("artifactDirectoryPath", "") and is_artifact_path(args.get("TargetFile", ""), data.get("artifactDirectoryPath", "")):
             if tool_name in ["write_to_file", "replace_file_content", "default_api:write_to_file", "default_api:replace_file_content"]:
                 return emit({"decision": "allow"})
@@ -85,6 +94,6 @@ def main(argv=None, stdin=None, stdout=None):
             return emit_deny("Attention Dilution Guard: The Primary Agent is forbidden from executing shell commands. You must delegate to a subagent.")
 
         emit_deny("Attention Dilution Guard: The Primary Agent is restricted to planning and artifact creation. Direct code modification and shell execution must be delegated to a subagent.")
-    except Exception: emit({"decision": "deny"})
+    except Exception as exc: emit({"decision": "deny", "reason": f"Attention Guard Exception in enforce-delegation: {exc}"})
 
 if __name__ == "__main__": main()
