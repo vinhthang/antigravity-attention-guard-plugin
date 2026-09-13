@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DiagnosticianPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["execution_attempt_id", "status", "summary"],
+  "properties": {
+    "execution_attempt_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "failed"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 1200
+    },
+    "diagnosis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root_cause_status", "proximate_cause", "evidence", "remediation_plan"],
+      "properties": {
+        "root_cause_status": {
+          "type": "string",
+          "enum": ["determined", "inconclusive"]
+        },
+        "proximate_cause": {
+          "type": "string",
+          "minLength": 10
+        },
+        "root_cause": {
+          "type": "string",
+          "minLength": 10
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["evidence_kind", "observation"],
+            "properties": {
+              "evidence_kind": {
+                "type": "string",
+                "enum": ["source_location", "command_output", "event_telemetry", "environment_state"]
+              },
+              "source_file": { "type": "string" },
+              "line_number": { "type": "integer", "minimum": 1 },
+              "command": { "type": "string" },
+              "observation": { "type": "string", "minLength": 5 }
+            }
+          }
+        },
+        "competing_hypotheses": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 10 }
+        },
+        "remediation_plan": {
+          "type": "string",
+          "minLength": 10
+        }
+      }
+    }
+  },
+  "if": {
+    "properties": { "status": { "const": "completed" } }
+  },
+  "then": {
+    "required": ["diagnosis"],
+    "if": {
+      "properties": {
+        "diagnosis": {
+          "properties": { "root_cause_status": { "const": "determined" } }
+        }
+      }
+    },
+    "then": {
+      "properties": {
+        "diagnosis": {
+          "required": ["root_cause"]
+        }
+      }
+    },
+    "else": {
+      "properties": {
+        "diagnosis": {
+          "required": ["competing_hypotheses"]
+        }
+      }
+    }
+  }
+}

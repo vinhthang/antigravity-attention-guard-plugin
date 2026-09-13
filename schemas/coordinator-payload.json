@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CoordinatorPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["execution_attempt_id", "status", "summary", "subagent_results"],
+  "properties": {
+    "execution_attempt_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "failed"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 1200
+    },
+    "subagent_results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["task_id", "worker_role", "status", "summary"],
+        "properties": {
+          "task_id": { "type": "string" },
+          "worker_role": { "type": "string" },
+          "status": { "type": "string", "enum": ["completed", "failed"] },
+          "advisory": { "type": "boolean" },
+          "summary": { "type": "string" },
+          "error_details": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["failure_kind", "diagnostic_message"],
+            "properties": {
+              "failure_kind": {
+                "type": "string",
+                "enum": ["SHELL_NON_ZERO_EXIT", "PAYLOAD_SCHEMA_VIOLATION", "COMMAND_POLICY_VIOLATION", "LIVENESS_TIMEOUT", "SYSTEM_SIGNAL", "ASSERTION_FAILURE"]
+              },
+              "diagnostic_message": { "type": "string" },
+              "failing_command": { "type": "string" },
+              "exit_code": { "type": "integer" },
+              "stderr_summary": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "if": {
+    "properties": { "status": { "const": "completed" } }
+  },
+  "then": {
+    "properties": {
+      "subagent_results": {
+        "items": {
+          "not": {
+            "properties": {
+              "status": { "const": "failed" },
+              "advisory": { "not": { "const": true } }
+            },
+            "required": ["status"]
+          }
+        }
+      }
+    }
+  }
+}

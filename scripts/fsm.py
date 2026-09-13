@@ -17,6 +17,7 @@ class Event(Enum):
     WORK_TERMINATED_OK = auto()
     WORK_TERMINATED_ERROR = auto()
     WORK_TIMED_OUT = auto()
+    TURN_CLOSED = auto()
 
 class TransitionError(Exception):
     pass
