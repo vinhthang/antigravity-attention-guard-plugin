@@ -1,6 +1,25 @@
 import sqlite3
 import os
 import time
+import threading
+import urllib.request
+import json
+
+def _push_metric_async(event_type, payload):
+    def _post():
+        try:
+            data = json.dumps({"event_type": event_type, "payload": payload}).encode("utf-8")
+            req = urllib.request.Request(
+                "http://attention-metrics-server.default.svc.cluster.local/api/metrics",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            urllib.request.urlopen(req, timeout=5)
+        except Exception:
+            return
+
+    threading.Thread(target=_post, daemon=True).start()
 
 class Ledger:
     def __init__(self, db_path=None):
@@ -68,6 +87,8 @@ class Ledger:
                     "INSERT INTO events (event_id, type, payload, created_at) VALUES (?, ?, ?, ?)",
                     (event_id, event_type, payload, time.time())
                 )
+                if event_type in ("PRIMARY_TOOL_DENIED", "STOP_REQUESTED"):
+                    _push_metric_async(event_type, payload)
                 return True
             except sqlite3.IntegrityError:
                 return False
