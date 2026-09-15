@@ -11,10 +11,11 @@ from typing import List, Optional, Tuple
 
 ALLOWED_BINARIES = {
     "rtk", "pytest", "python3", "python", "git", "rsync",
-    "echo", "mkdir", "cp", "rm", "test", "cat", "chmod"
+    "echo", "mkdir", "cp", "rm", "test", "cat", "chmod", "mvn", "mvnw", "gradlew",
+    "npm", "node", "npx", "go", "golangci-lint", "docker", "ssh", "make"
 }
 
-ALLOWED_GIT_SUBCOMMANDS = {"status", "diff", "log", "add", "commit"}
+ALLOWED_GIT_SUBCOMMANDS = {"status", "diff", "log", "add", "commit", "fetch"}
 FORBIDDEN_GIT_FLAGS = {"-C", "--git-dir", "--work-tree", "--exec-path"}
 
 DEPLOYMENT_BASE_DIR = os.path.realpath(os.path.expanduser("~/.gemini/config/plugins"))
@@ -105,10 +106,13 @@ def validate_command(command_str: str, workspace_root: Optional[str] = None) -> 
         
         if "/" in arg or arg.endswith(".py") or arg.endswith(".json") or arg.endswith(".md"):
             expanded_arg = os.path.expanduser(arg)
-            real_arg = os.path.realpath(expanded_arg if os.path.isabs(expanded_arg) else os.path.join(workspace_root, expanded_arg))
+            abs_arg = os.path.abspath(expanded_arg if os.path.isabs(expanded_arg) else os.path.join(workspace_root, expanded_arg))
+            real_arg = os.path.realpath(abs_arg)
             
-            # P0 Check: Elevated deployment directory access
+            # P0 Check: Elevated deployment directory access (lexical and realpath)
             in_deploy_dir = (
+                abs_arg == DEPLOYMENT_BASE_DIR or
+                os.path.commonpath([abs_arg, DEPLOYMENT_BASE_DIR]) == DEPLOYMENT_BASE_DIR or
                 real_arg == DEPLOYMENT_BASE_DIR or
                 os.path.commonpath([real_arg, DEPLOYMENT_BASE_DIR]) == DEPLOYMENT_BASE_DIR
             )

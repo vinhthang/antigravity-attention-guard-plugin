@@ -54,8 +54,8 @@ def test_turn_zero_completion(setup_env):
     }
     
     with open(setup_env / "transcript.jsonl", "w") as f:
-        f.write(json.dumps({"source": "USER_EXPLICIT", "type": "USER_INPUT", "step_index": 0}) + "\n")
-        f.write(json.dumps({"source": "MODEL", "type": "PLANNER_RESPONSE", "content": f"[ANTIGRAVITY_TOKEN:{token}]"}) + "\n")
+        f.write(json.dumps({"source": "USER_EXPLICIT", "type": "USER_INPUT", "step_index": 0, "content": f"[ANTIGRAVITY_TOKEN:{token}]"}) + "\n")
+        f.write(json.dumps({"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "Acknowledged."}) + "\n")
         
     _run_hook(attention_check_mod, payload)
     
@@ -110,3 +110,11 @@ def test_timeout_handling(setup_env):
         # Assert WORK_TERMINATED_OK was NOT inserted
         cursor = conn.execute("SELECT COUNT(*) FROM events WHERE event_id LIKE ? AND type = 'WORK_TERMINATED_OK'", (f"parent_1_%",))
         assert cursor.fetchone()[0] == 0
+
+
+def test_handoff_pending_primary_tool_denied():
+    from fsm import FSM, State, Event
+    f = FSM(initial_state=State.HANDOFF_PENDING)
+    action = f.transition(Event.PRIMARY_TOOL_DENIED)
+    assert f.state == State.RECOVERY_REQUIRED
+    assert action == "Write marker"

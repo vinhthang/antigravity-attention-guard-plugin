@@ -44,6 +44,9 @@ def deploy(source_dir: str = CANONICAL_SOURCE, target_dir: str = INSTALLED_TARGE
         return False
 
     print(f"Target deployment path: {target_dir}")
+    if os.path.realpath(source_dir) == os.path.realpath(target_dir):
+        print("Source and target resolve to the same directory (active symlink). No synchronization needed.")
+        return True
     os.makedirs(target_dir, exist_ok=True)
 
     print("Syncing bundle files to target plugin...")

@@ -354,3 +354,30 @@ class TestIdentityAndCommandRemediation:
         result = run_hook(bad_payload_pipe)
         assert result["decision"] == "deny", f"Expected deny for shell operator, got: {result}"
         assert "Attention Guard Command Policy Violation" in result.get("reason", "")
+
+
+def test_two_tiered_escalation():
+    agents_rule_path = os.path.join(PLUGIN_ROOT, "rules", "AGENTS.md")
+    assert os.path.exists(agents_rule_path), "rules/AGENTS.md must exist in Attention Guard"
+    with open(agents_rule_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Verify rule identity
+    assert '<rule name="agent-delegation">' in content
+
+    # Verify Section 1 preservation
+    assert "### 1. Subagent Model Selection Framework" in content
+    assert "flash_lite" in content
+
+    # Verify Section 2 Two-Tiered Escalation Protocol
+    assert "Tier 1: Read-Only Pro Diagnostician" in content
+    assert "Tier 2: WorkBuddy External Second-Opinion" in content
+    assert "escalation_counter >= 3" in content
+    assert 'explicit human approval ("Proceed")' in content
+
+    # Verify Section 3 preservation
+    assert "### 3. Subagent Liveness Tracking" in content
+    assert 'schedule(DurationSeconds=300' in content
+
+    # Verify Section 4 preservation
+    assert "### 4. Subagent Termination Cleanup" in content
