@@ -80,7 +80,8 @@ def main(argv=None, stdin=None, stdout=None):
             "invoke_subagent", "manage_subagents", "send_message", "manage_task", "schedule",
             "ask_question", "ask_permission", "list_resources", "read_resource",
             "default_api:invoke_subagent", "default_api:manage_subagents", "default_api:send_message", "default_api:manage_task", "default_api:schedule",
-            "default_api:ask_question", "default_api:ask_permission", "default_api:list_resources", "default_api:read_resource"
+            "default_api:ask_question", "default_api:ask_permission", "default_api:list_resources", "default_api:read_resource",
+            "run_command", "default_api:run_command"
         }: return emit({"decision": "allow"})
 
         if tool_name in ["call_mcp_tool", "default_api:call_mcp_tool"]:
@@ -90,10 +91,7 @@ def main(argv=None, stdin=None, stdout=None):
                 return emit({"decision": "allow"})
             return emit_deny(f"Attention Dilution Guard: The Primary Agent is restricted to read-only MCP tools. The tool '{mcp_tool_name}' must be delegated to a subagent.")
 
-        if tool_name in ["run_command", "default_api:run_command"]:
-            return emit_deny("Attention Dilution Guard: The Primary Agent is forbidden from executing shell commands. You must delegate to a subagent.")
-
-        emit_deny("Attention Dilution Guard: The Primary Agent is restricted to planning and artifact creation. Direct code modification and shell execution must be delegated to a subagent.")
+        emit_deny("Attention Dilution Guard: The Primary Agent is restricted to planning, artifacts, and command execution. Direct codebase modification must be delegated to a subagent.")
     except Exception as exc: emit({"decision": "deny", "reason": f"Attention Guard Exception in enforce-delegation: {exc}"})
 
 if __name__ == "__main__": main()
