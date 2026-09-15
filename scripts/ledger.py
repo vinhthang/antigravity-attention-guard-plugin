@@ -45,12 +45,7 @@ class Ledger:
                         raise
 
     def _prune_opportunistically(self):
-        cutoff = time.time() - (48 * 3600)
-        with self._get_connection() as conn:
-            conn.execute("DELETE FROM events WHERE created_at < ?", (cutoff,))
-            conn.execute("DELETE FROM tokens WHERE created_at < ?", (cutoff,))
-            conn.execute("DELETE FROM work_items WHERE created_at < ?", (cutoff,))
-            conn.execute("DELETE FROM turns WHERE created_at < ?", (cutoff,))
+        pass
 
     def claim_token(self, token_id, conv_id):
         with self._get_connection() as conn:

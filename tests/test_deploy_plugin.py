@@ -15,7 +15,7 @@ def test_deploy_symlink_self_copy_guard(tmp_path):
     bundle_dir.mkdir()
     for item in ["plugin.json", "hooks.json"]:
         (bundle_dir / item).write_text("{}", encoding="utf-8")
-    for item in ["rules", "schemas", "scripts"]:
+    for item in ["rules", "schemas", "scripts", "skills"]:
         sub = bundle_dir / item
         sub.mkdir()
         (sub / "dummy.txt").write_text("content", encoding="utf-8")

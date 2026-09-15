@@ -101,6 +101,9 @@ def main(argv=None, stdin=None, stdout=None):
         }: return emit({"decision": "allow"})
 
         if tool_name in ["run_command", "default_api:run_command"]:
+            cmd = args.get("CommandLine", "")
+            if "diagnostics.py --metrics" in cmd:
+                return emit({"decision": "allow"})
             return emit_deny("Attention Dilution Guard: The Primary Agent is forbidden from executing shell commands. Shell execution must be delegated to an execution subagent.")
 
         if tool_name in ["call_mcp_tool", "default_api:call_mcp_tool"]:

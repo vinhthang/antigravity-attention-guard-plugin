@@ -52,6 +52,16 @@ class TestSubagentDetection:
         assert result["decision"] == "deny"
         assert "forbidden from executing shell commands" in result.get("reason", "")
 
+    def test_primary_agent_diagnostics_metrics_allowed(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "run_command",
+                "args": {"CommandLine": "python3 scripts/diagnostics.py --metrics"}
+            }
+        })
+        assert result["decision"] == "allow"
+
     def test_subagent_with_token_allowed(self, tmp_path):
         import ledger
         importlib.reload(ledger)

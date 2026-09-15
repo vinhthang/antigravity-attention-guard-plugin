@@ -13,7 +13,7 @@ from typing import Tuple, List
 
 CANONICAL_SOURCE = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
 INSTALLED_TARGET = os.path.realpath(os.path.expanduser("~/.gemini/config/plugins/attention-guard"))
-BUNDLE_ITEMS = ["plugin.json", "hooks.json", "rules", "schemas", "scripts"]
+BUNDLE_ITEMS = ["plugin.json", "hooks.json", "rules", "schemas", "scripts", "skills"]
 
 def verify_source_bundle(source_dir: str) -> Tuple[bool, List[str]]:
     missing = []
