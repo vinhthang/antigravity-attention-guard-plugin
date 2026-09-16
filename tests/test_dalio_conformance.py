@@ -191,10 +191,30 @@ class TestCommandValidator:
 
     def test_unauthorized_git_subcommands(self):
         ws = PLUGIN_ROOT
-        for subcmd in ["push", "rebase", "reset", "filter-branch", "checkout"]:
+        for subcmd in ["rebase", "reset", "filter-branch", "checkout"]:
             cmd = f"git {subcmd} origin main"
             ok, err = command_validator.validate_command(cmd, ws)
             assert not ok, f"git subcommand '{subcmd}' should be rejected"
+
+    def test_git_push_policy(self):
+        ws = PLUGIN_ROOT
+        ok, err = command_validator.validate_command("git push origin feat/my-branch", ws)
+        assert ok, f"git push to feature branch should be permitted: {err}"
+
+        ok, err = command_validator.validate_command("git push origin main", ws)
+        assert not ok, "git push directly to main should be rejected"
+        assert "protected branch" in str(err)
+
+        ok, err = command_validator.validate_command("git push origin master", ws)
+        assert not ok, "git push directly to master should be rejected"
+        assert "protected branch" in str(err)
+
+    def test_destructive_binaries_forbidden(self):
+        ws = PLUGIN_ROOT
+        for b in ["rm", "chmod"]:
+            ok, err = command_validator.validate_command(f"{b} file.txt", ws)
+            assert not ok, f"Binary '{b}' should be rejected"
+            assert "not in allowed binary whitelist" in str(err)
 
     def test_p0_security_elevated_deployment_boundary(self):
         ws = PLUGIN_ROOT

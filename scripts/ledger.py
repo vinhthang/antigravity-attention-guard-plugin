@@ -8,9 +8,13 @@ import json
 def _push_metric_async(event_type, payload):
     def _post():
         try:
+            server_url = os.environ.get(
+                "ATTENTION_METRICS_SERVER_URL",
+                "https://attention-metrics-server.vinhthang.dev/api/metrics"
+            )
             data = json.dumps({"event_type": event_type, "payload": payload}).encode("utf-8")
             req = urllib.request.Request(
-                "http://attention-metrics-server.default.svc.cluster.local/api/metrics",
+                server_url,
                 data=data,
                 headers={"Content-Type": "application/json"},
                 method="POST"

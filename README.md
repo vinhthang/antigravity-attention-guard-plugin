@@ -8,7 +8,7 @@
 
 | Hook | Script | Purpose |
 |---|---|---|
-| PreToolUse | `enforce-delegation.py` | Blocks direct codebase modification, but grants full shell and MCP tool access for flexible coordination. |
+| PreToolUse | `enforce-delegation.py` | Blocks direct codebase modification, validates subagent commands (forbids destructive tools like `rm`/`chmod`, allows feature branch `git push`), and grants full shell and MCP tool access to the primary agent. |
 | PreToolUse | `inject-rules.py` | Dynamically injects robust subagent detection markers and liveness tracking rules into subagent prompts. |
 | Stop | `attention-check.py` | Acts as an invariant refresh. Periodically reminds the primary agent of the core rule: Delegate all execution to subagents. Max 2 retries to prevent infinite loops. |
 
@@ -39,13 +39,20 @@ The plugin enforces a strict two-phase lifecycle for safe agentic workflows:
 
 Thanks to deterministic transcript markers injected into the subagents' prompts, **any** subagent model (`flash`, `pro`, `flash_lite`, `inherit`, etc.) is now fully supported.
 
+### Subagent Security Policy
+
+Subagent shell commands are strictly validated:
+- **Destructive Utilities Forbidden**: Commands invoking destructive utilities (`rm`, `chmod`) are rejected to preserve file integrity.
+- **Git Push Policy**: Feature branch pushes (e.g. `git push origin feat/...`) are permitted, but direct pushes to protected branches (`main`, `master`) are strictly blocked.
+- **Path Confinement**: Commands cannot escape the workspace root or tamper with plugin deployment directories.
+
 ### Liveness Tracking
 
 The plugin enforces a **mandatory 5-minute liveness tracking rule** for all subagents via injected prompt instructions (`AGENTS.md`) rather than a hard runtime block. This ensures the Primary Agent sets a liveness timer when spawning subagents, preventing the Primary Agent from sleeping indefinitely if a subagent hangs.
 
 ## Telemetry & Metrics
 
-The plugin features a local SQLite ledger that permanently tracks `PRIMARY_TOOL_DENIED` and `STOP_REQUESTED` events. Users can instantly view this dashboard by asking the Antigravity agent: "Show me my attention metrics" using the new built-in skill.
+The plugin features a local SQLite ledger that permanently tracks `PRIMARY_TOOL_DENIED` and `STOP_REQUESTED` events. Users can instantly view this dashboard by asking the Antigravity agent: "Show me my attention metrics" using the new built-in skill. Remote metrics streaming is configurable via the `ATTENTION_METRICS_SERVER_URL` environment variable, defaulting to `https://attention-metrics-server.vinhthang.dev/api/metrics`.
 
 ## Running Tests
 

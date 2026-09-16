@@ -11,11 +11,11 @@ from typing import List, Optional, Tuple
 
 ALLOWED_BINARIES = {
     "rtk", "pytest", "python3", "python", "git", "rsync",
-    "echo", "mkdir", "cp", "rm", "test", "cat", "chmod", "mvn", "mvnw", "gradlew",
+    "echo", "mkdir", "cp", "test", "cat", "mvn", "mvnw", "gradlew",
     "npm", "node", "npx", "go", "golangci-lint", "docker", "ssh", "make"
 }
 
-ALLOWED_GIT_SUBCOMMANDS = {"status", "diff", "log", "add", "commit", "fetch"}
+ALLOWED_GIT_SUBCOMMANDS = {"status", "diff", "log", "add", "commit", "fetch", "push"}
 FORBIDDEN_GIT_FLAGS = {"-C", "--git-dir", "--work-tree", "--exec-path"}
 
 DEPLOYMENT_BASE_DIR = os.path.realpath(os.path.expanduser("~/.gemini/config/plugins"))
@@ -83,6 +83,15 @@ def validate_command(command_str: str, workspace_root: Optional[str] = None) -> 
             return False, "git invocation missing subcommand"
         if subcmd not in ALLOWED_GIT_SUBCOMMANDS:
             return False, f"git subcommand '{subcmd}' is forbidden. Allowed: {sorted(list(ALLOWED_GIT_SUBCOMMANDS))}"
+
+        if subcmd == "push":
+            for arg in tokens[1:]:
+                if (
+                    arg in ("main", "master", "origin/main", "origin/master")
+                    or arg.endswith(":main")
+                    or arg.endswith(":master")
+                ):
+                    return False, f"Direct git push to protected branch '{arg}' is forbidden. Subagents must push to feature branches."
 
     # 6. Python script policy
     is_deploy_script = False
@@ -162,7 +171,16 @@ def run_tests() -> bool:
     assert not ok, "curl should be rejected"
 
     ok, err = validate_command("git push origin main", ws)
-    assert not ok, "git push should be rejected"
+    assert not ok, "git push origin main should be rejected"
+
+    ok, err = validate_command("git push origin feat/test", ws)
+    assert ok, f"git push origin feat/test should be allowed: {err}"
+
+    ok, err = validate_command("rm -rf test.txt", ws)
+    assert not ok, "rm should be rejected"
+
+    ok, err = validate_command("chmod 777 test.sh", ws)
+    assert not ok, "chmod should be rejected"
 
     ok, err = validate_command("git status", ws)
     assert ok, f"git status failed: {err}"

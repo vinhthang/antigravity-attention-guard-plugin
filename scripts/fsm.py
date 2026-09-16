@@ -50,12 +50,6 @@ class FSM:
             elif event == Event.PRIMARY_TOOL_DENIED:
                 self.state = State.RECOVERY_REQUIRED
                 return "Write marker"
-            elif event == Event.PRIMARY_TOOL_DENIED:
-                self.state = State.RECOVERY_REQUIRED
-                return "Write marker"
-            elif event == Event.PRIMARY_TOOL_DENIED:
-                self.state = State.RECOVERY_REQUIRED
-                return "Write marker"
 
         elif self.state == State.EXECUTION_ACTIVE:
             if event == Event.WORK_TERMINATED_OK:
