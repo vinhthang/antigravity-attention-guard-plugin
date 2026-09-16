@@ -103,12 +103,24 @@ def main(argv=None, stdin=None, stdout=None):
         if current_state == State.EXECUTION_ACTIVE:
             with ledger._get_connection() as conn:
                 cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status NOT IN ('TERMINATED', 'FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
-                if cursor.fetchone()[0] == 0:
+                active_count = cursor.fetchone()[0]
+                cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
+                total_count = cursor.fetchone()[0]
+
+            if total_count > 0 and active_count == 0:
+                with ledger._get_connection() as conn:
+                    cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status IN ('FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
+                    failure_count = cursor.fetchone()[0]
+                if failure_count == 0:
+                    ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.WORK_TERMINATED_OK.name, json.dumps({"all_work_terminal": True}))
+                    ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False}))
+                    ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
+                    reset_rejection_count(tracker)
+                    return emit({"decision": "allow"})
+                else:
                     ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.WORK_TIMED_OUT.name, json.dumps({"reason": "Orphaned work timed out"}))
                     current_state = State.RECOVERY_REQUIRED
-
-        if current_state == State.EXECUTION_ACTIVE:
-            if payload.get("fullyIdle", True):
+            elif active_count > 0 and payload.get("fullyIdle", True):
                 ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.WORK_TERMINATED_ERROR.name, json.dumps({"reason": "Primary idled while active"}))
                 current_state = State.RECOVERY_REQUIRED
             else:
@@ -116,6 +128,22 @@ def main(argv=None, stdin=None, stdout=None):
                 return emit({"decision": "allow"})
 
         if current_state == State.RECOVERY_REQUIRED:
+            with ledger._get_connection() as conn:
+                cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status NOT IN ('TERMINATED', 'FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
+                active_count = cursor.fetchone()[0]
+                cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
+                total_count = cursor.fetchone()[0]
+
+            if total_count > 0 and active_count == 0:
+                with ledger._get_connection() as conn:
+                    cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status IN ('FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
+                    failure_count = cursor.fetchone()[0]
+                if failure_count == 0:
+                    ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False, "auto_recovered": True}))
+                    ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
+                    reset_rejection_count(tracker)
+                    return emit({"decision": "allow"})
+
             rejection_count = get_rejection_count(tracker)
             if rejection_count >= MAX_STOP_REJECTIONS:
                 reset_rejection_count(tracker)

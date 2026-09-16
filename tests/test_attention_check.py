@@ -1,3 +1,4 @@
+import time
 #!/usr/bin/env python3
 import json
 import os
@@ -175,3 +176,32 @@ class TestStopRejectionLimit:
         # OPEN state
         result = run_hook(payload)
         assert result == {"decision": "allow"}
+    def test_completed_subagent_work_allows_immediate_stop(self, tmp_path):
+        import ledger
+        importlib.reload(ledger)
+        l = ledger.Ledger()
+        conv_id = f"chk-complete-{os.getpid()}"
+        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
+        create_transcript(str(transcript), [
+            {"source": "USER", "type": "USER_INPUT", "content": "build feature", "step_index": 1},
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "Done."}
+        ])
+
+        payload = {
+            "fullyIdle": True,
+            "modelName": "claude-opus-4.6",
+            "conversationId": conv_id,
+            "transcriptPath": str(transcript),
+            "workspacePaths": []
+        }
+
+        token = "tok-123"
+        with l._get_connection() as conn:
+            conn.execute("INSERT INTO tokens (token_id, claimed, claimed_by) VALUES (?, 1, ?)", (token, "child-1"))
+            conn.execute("INSERT INTO work_items (work_id, status, created_at, updated_at, parent_conv_id, parent_turn_id, step_idx) VALUES (?, 'TERMINATED', ?, ?, ?, '1', '1')", (token, time.time(), time.time(), conv_id))
+
+        l.insert_event(conv_id, "1", "PreToolUse", "0", "enforce", Event.PRIMARY_TOOL_DENIED.name, json.dumps({"reason": "blocked"}))
+
+        result = run_hook(payload)
+        assert result == {"decision": "allow"}
+
