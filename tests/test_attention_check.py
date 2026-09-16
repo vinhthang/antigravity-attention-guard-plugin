@@ -187,6 +187,11 @@ class TestStopRejectionLimit:
             {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "Done."}
         ])
 
+        # Create valid walkthrough.md
+        wt = tmp_path / "brain" / conv_id / "walkthrough.md"
+        wt.parent.mkdir(parents=True, exist_ok=True)
+        wt.write_text("# Walkthrough\nFeature completed.")
+
         payload = {
             "fullyIdle": True,
             "modelName": "claude-opus-4.6",
@@ -204,4 +209,37 @@ class TestStopRejectionLimit:
 
         result = run_hook(payload)
         assert result == {"decision": "allow"}
+
+    def test_completed_subagent_work_blocked_without_walkthrough(self, tmp_path):
+        import ledger
+        importlib.reload(ledger)
+        l = ledger.Ledger()
+        conv_id = f"chk-no-wt-{os.getpid()}"
+        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
+        create_transcript(str(transcript), [
+            {"source": "USER", "type": "USER_INPUT", "content": "build feature", "step_index": 1},
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "Done."}
+        ])
+
+        # Note: walkthrough.md is NOT created here!
+        payload = {
+            "fullyIdle": True,
+            "modelName": "claude-opus-4.6",
+            "conversationId": conv_id,
+            "transcriptPath": str(transcript),
+            "workspacePaths": []
+        }
+
+        token = "tok-456"
+        with l._get_connection() as conn:
+            conn.execute("INSERT INTO tokens (token_id, claimed, claimed_by) VALUES (?, 1, ?)", (token, "child-2"))
+            conn.execute("INSERT INTO work_items (work_id, status, created_at, updated_at, parent_conv_id, parent_turn_id, step_idx) VALUES (?, 'TERMINATED', ?, ?, ?, '1', '1')", (token, time.time(), time.time(), conv_id))
+
+        # Put FSM into EXECUTION_ACTIVE
+        l.insert_event(conv_id, "1", "PreToolUse", "0", "invoke", Event.WORK_PREPARED.name, json.dumps({"tool": "invoke"}))
+        l.insert_event(conv_id, "1", "PostToolUse", "0", "invoke", Event.HANDOFF_ACCEPTED.name, json.dumps({}))
+
+        result = run_hook(payload)
+        assert result.get("decision") == "continue"
+        assert "Walkthrough Gate" in result.get("reason", "")
 
