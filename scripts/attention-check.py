@@ -10,7 +10,7 @@ def get_rejection_count(tracker):
     count_file = tracker + "_stop_count"
     if os.path.exists(count_file):
         try: return int(open(count_file, "r").read().strip())
-        except: pass
+        except Exception as exc: sys.stderr.write(f"Warning: {exc}\n")
     return 0
 def increment_rejection_count(tracker):
     count_file = tracker + "_stop_count"
@@ -20,14 +20,14 @@ def increment_rejection_count(tracker):
 def reset_rejection_count(tracker):
     count_file = tracker + "_stop_count"
     try: os.remove(count_file)
-    except: pass
+    except Exception as exc: sys.stderr.write(f"Warning: {exc}\n")
 
 def get_current_fsm_state(ledger, conv_id, turn_id):
     fsm = FSM()
     with ledger._get_connection() as conn:
         for row in conn.execute("SELECT type, payload FROM events WHERE event_id LIKE ? ORDER BY created_at ASC", (f"{conv_id}_{turn_id}_%",)):
             try: fsm.transition(Event[row[0]], json.loads(row[1]) if row[1] else {})
-            except KeyError: pass
+            except KeyError as exc: sys.stderr.write(f"Warning: {exc}\n")
     return fsm.state
 
 def main(argv=None, stdin=None, stdout=None):
@@ -51,8 +51,8 @@ def main(argv=None, stdin=None, stdout=None):
         with ledger._get_connection() as conn:
             cutoff = time.time() - 86400
             conn.execute("UPDATE work_items SET status = 'TIMED_OUT' WHERE status NOT IN ('TERMINATED', 'FAILED', 'TIMED_OUT') AND COALESCE(updated_at, created_at) < ?", (cutoff,))
-    except Exception:
-        pass
+    except Exception as exc:
+        sys.stderr.write(f"Warning: {exc}\n")
 
     try:
         is_sub, _, _, parent_conv_id, parent_turn_id = is_subagent(payload)
@@ -123,7 +123,8 @@ def main(argv=None, stdin=None, stdout=None):
                 return emit({"decision": "allow"})
             rejection_count = increment_rejection_count(tracker)
             return emit({"decision": "continue", "reason": f"Attention Guard Refresh: Remember you are the Primary Agent. Delegate all execution to subagents. (Retry {rejection_count}/{MAX_STOP_REJECTIONS})"})
-    except Exception: pass
+    except Exception as exc:
+        sys.stderr.write(f"Warning: {exc}\n")
     emit({"decision": "allow"})
 
 if __name__ == "__main__": main()

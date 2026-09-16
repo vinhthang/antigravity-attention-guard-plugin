@@ -4,20 +4,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 from common import is_subagent, get_cache_dir, get_turn_state
 from ledger import Ledger
 from fsm import Event
-
-MCP_READ_ALLOWLIST = {
-    ("codegraph", "codegraph_search"), ("codegraph", "codegraph_context"),
-    ("codegraph", "codegraph_callers"), ("codegraph", "codegraph_callees"),
-    ("codegraph", "codegraph_node"), ("codegraph", "codegraph_explore"),
-    ("codegraph", "codegraph_status"), ("codegraph", "codegraph_files"),
-    ("codegraph", "codegraph_impact"),
-    ("context7", "resolve-library-id"), ("context7", "query-docs"),
-    ("sequential-thinking", "sequentialthinking"),
-    ("server-filesystem", "read_file"), ("server-filesystem", "read_text_file"),
-    ("server-filesystem", "read_media_file"),
-    ("server-filesystem", "list_directory"), ("server-filesystem", "list_directory_with_sizes"),
-    ("server-filesystem", "get_file_info"), ("server-filesystem", "list_allowed_directories")
-}
+from command_validator import validate_command
+from review_gate import validate_review_gate
 
 def is_artifact_path(target_file, artifact_dir):
     if not target_file: return False
@@ -38,7 +26,8 @@ def main(argv=None, stdin=None, stdout=None):
             stdout.write(json.dumps(data) + "\n")
     try:
         raw_payload = stdin.read()
-        if not raw_payload or not raw_payload.strip(): return emit({"decision": "allow"})
+        if not raw_payload or not raw_payload.strip():
+            return emit({"decision": "deny", "reason": "Empty input payload"})
         data = json.loads(raw_payload)
 
         def emit_deny(reason):
@@ -47,44 +36,63 @@ def main(argv=None, stdin=None, stdout=None):
                 conv_id = data.get("conversationId", "unknown")
                 step_idx = data.get("stepIdx", 0)
                 Ledger().insert_event(conv_id, str(turn_id), "PreToolUse", str(step_idx), "enforce", Event.PRIMARY_TOOL_DENIED.name, json.dumps({"reason": reason}))
-            except Exception: pass
+            except Exception as exc:
+                sys.stderr.write(f"Warning: {exc}\n")
             emit({"decision": "deny", "reason": reason})
 
         is_sub, may_delegate, remaining_depth, _, _ = is_subagent(data)
-        if is_sub:
-            tool_name = data.get("toolCall", {}).get("name", "")
-            if tool_name in ["invoke_subagent", "manage_subagents", "default_api:invoke_subagent", "default_api:manage_subagents"]:
-                if not may_delegate or remaining_depth <= 0:
-                    return emit_deny("Attention Dilution Guard: Subagents are forbidden from delegating tasks further. Do not invoke or manage subagents.")
-            return emit({"decision": "allow"})
-
         tool_call = data.get("toolCall", {})
         tool_name = tool_call.get("name", "")
         args = tool_call.get("args", {})
+
+        if is_sub:
+            if tool_name in ["invoke_subagent", "manage_subagents", "default_api:invoke_subagent", "default_api:manage_subagents"]:
+                if not may_delegate or remaining_depth <= 0:
+                    return emit_deny("Attention Dilution Guard: Subagents are forbidden from delegating tasks further. Do not invoke or manage subagents.")
+            if tool_name in ["run_command", "default_api:run_command"]:
+                cmd = args.get("CommandLine", "")
+                cwd = args.get("Cwd", "") or os.getcwd()
+                valid, err = validate_command(cmd, workspace_root=cwd)
+                if not valid:
+                    return emit_deny(f"Attention Guard Command Policy Violation: {err}")
+            return emit({"decision": "allow"})
+
         if data.get("artifactDirectoryPath", "") and is_artifact_path(args.get("TargetFile", ""), data.get("artifactDirectoryPath", "")):
             if tool_name in ["write_to_file", "replace_file_content", "default_api:write_to_file", "default_api:replace_file_content"]:
                 return emit({"decision": "allow"})
 
+        if tool_name in ["invoke_subagent", "default_api:invoke_subagent"]:
+            subagents = args.get("Subagents", [])
+            for sub in subagents:
+                role = str(sub.get("Role", "")).lower()
+                typename = str(sub.get("TypeName", "")).lower()
+                is_exempt = any(exempt_keyword in role or exempt_keyword in typename for exempt_keyword in ("review", "diagnostician", "diagnostic", "research", "probe"))
+                if not is_exempt:
+                    cwd = os.getcwd()
+                    ok, gate_err = validate_review_gate(cwd)
+                    if not ok:
+                        return emit_deny(gate_err)
+            return emit({"decision": "allow"})
+
+        if tool_name in ["manage_subagents", "default_api:manage_subagents"]:
+            return emit({"decision": "allow"})
+
         if tool_name in ["generate_image", "default_api:generate_image"] or tool_name in {
             "view_file", "grep_search", "list_dir", "find_by_name", "search_web", "read_url_content",
             "default_api:view_file", "default_api:grep_search", "default_api:list_dir", "default_api:find_by_name", "default_api:search_web", "default_api:read_url_content",
-            "invoke_subagent", "manage_subagents", "send_message", "manage_task", "schedule",
+            "send_message", "manage_task", "schedule",
             "ask_question", "ask_permission", "list_resources", "read_resource",
-            "default_api:invoke_subagent", "default_api:manage_subagents", "default_api:send_message", "default_api:manage_task", "default_api:schedule",
-            "default_api:ask_question", "default_api:ask_permission", "default_api:list_resources", "default_api:read_resource"
+            "default_api:send_message", "default_api:manage_task", "default_api:schedule",
+            "default_api:ask_question", "default_api:ask_permission", "default_api:list_resources", "default_api:read_resource",
         }: return emit({"decision": "allow"})
 
-        if tool_name in ["call_mcp_tool", "default_api:call_mcp_tool"]:
-            mcp_tool_name = args.get("ToolName", "")
-            server_name = args.get("ServerName", "")
-            if (server_name, mcp_tool_name) in MCP_READ_ALLOWLIST:
-                return emit({"decision": "allow"})
-            return emit_deny(f"Attention Dilution Guard: The Primary Agent is restricted to read-only MCP tools. The tool '{mcp_tool_name}' must be delegated to a subagent.")
-
         if tool_name in ["run_command", "default_api:run_command"]:
-            return emit_deny("Attention Dilution Guard: The Primary Agent is forbidden from executing shell commands. You must delegate to a subagent.")
+            return emit({"decision": "allow"})
 
-        emit_deny("Attention Dilution Guard: The Primary Agent is restricted to planning and artifact creation. Direct code modification and shell execution must be delegated to a subagent.")
-    except Exception: emit({"decision": "deny"})
+        if tool_name in ["call_mcp_tool", "default_api:call_mcp_tool"]:
+            return emit({"decision": "allow"})
+
+        emit_deny("Attention Dilution Guard: The Primary Agent is restricted to planning, artifacts, and command execution. Direct codebase modification must be delegated to a subagent.")
+    except Exception as exc: emit({"decision": "deny", "reason": f"Attention Guard Exception in enforce-delegation: {exc}"})
 
 if __name__ == "__main__": main()

@@ -56,7 +56,7 @@ def main(argv=None, stdin=None, stdout=None):
             emit({"decision": "allow", "overwrite": {"Subagents": subagents}})
             return
         emit({"decision": "allow"})
-    except Exception:
-        emit({"decision": "allow"})
+    except Exception as exc:
+        emit({"decision": "deny", "reason": f"Attention Guard Exception in inject-rules: {exc}"})
 
 if __name__ == "__main__": main()

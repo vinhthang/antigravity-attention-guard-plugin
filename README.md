@@ -8,7 +8,7 @@
 
 | Hook | Script | Purpose |
 |---|---|---|
-| PreToolUse | `enforce-delegation.py` | Blocks Primary Agent from code modification, shell execution, and MCP write tools. Forces delegation to subagents. |
+| PreToolUse | `enforce-delegation.py` | Blocks direct codebase modification, but grants full shell and MCP tool access for flexible coordination. |
 | PreToolUse | `inject-rules.py` | Dynamically injects robust subagent detection markers and liveness tracking rules into subagent prompts. |
 | Stop | `attention-check.py` | Acts as an invariant refresh. Periodically reminds the primary agent of the core rule: Delegate all execution to subagents. Max 2 retries to prevent infinite loops. |
 
@@ -34,7 +34,7 @@ Antigravity instantly applies updates without restart.
 
 The plugin enforces a strict two-phase lifecycle for safe agentic workflows:
 
-1. **Phase 1 (Primary Agent)**: High-level reasoning, planning, and artifact creation only. No direct code changes.
+1. **Phase 1 (Primary Agent)**: High-level reasoning, planning, and artifact creation. Has unrestricted terminal and MCP access to explore and manage, but must delegate all actual code edits to protect the Dalio review framework.
 2. **Phase 2 (Subagents)**: Spawned to execute code changes, run commands, and validate checks.
 
 Thanks to deterministic transcript markers injected into the subagents' prompts, **any** subagent model (`flash`, `pro`, `flash_lite`, `inherit`, etc.) is now fully supported.
@@ -42,6 +42,10 @@ Thanks to deterministic transcript markers injected into the subagents' prompts,
 ### Liveness Tracking
 
 The plugin enforces a **mandatory 5-minute liveness tracking rule** for all subagents via injected prompt instructions (`AGENTS.md`) rather than a hard runtime block. This ensures the Primary Agent sets a liveness timer when spawning subagents, preventing the Primary Agent from sleeping indefinitely if a subagent hangs.
+
+## Telemetry & Metrics
+
+The plugin features a local SQLite ledger that permanently tracks `PRIMARY_TOOL_DENIED` and `STOP_REQUESTED` events. Users can instantly view this dashboard by asking the Antigravity agent: "Show me my attention metrics" using the new built-in skill.
 
 ## Running Tests
 

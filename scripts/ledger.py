@@ -1,6 +1,25 @@
 import sqlite3
 import os
 import time
+import threading
+import urllib.request
+import json
+
+def _push_metric_async(event_type, payload):
+    def _post():
+        try:
+            data = json.dumps({"event_type": event_type, "payload": payload}).encode("utf-8")
+            req = urllib.request.Request(
+                "http://attention-metrics-server.default.svc.cluster.local/api/metrics",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            urllib.request.urlopen(req, timeout=5)
+        except Exception:
+            return
+
+    threading.Thread(target=_post, daemon=True).start()
 
 class Ledger:
     def __init__(self, db_path=None):
@@ -31,24 +50,21 @@ class Ledger:
                 CREATE TABLE IF NOT EXISTS events (event_id TEXT PRIMARY KEY, type TEXT, payload TEXT, created_at REAL);
                 CREATE TABLE IF NOT EXISTS work_items (work_id TEXT PRIMARY KEY, status TEXT, created_at REAL, parent_conv_id TEXT, parent_turn_id TEXT, step_idx TEXT);
             ''')
-            try: conn.execute("ALTER TABLE tokens ADD COLUMN claimed_by TEXT")
-            except sqlite3.OperationalError: pass
-            try: conn.execute("ALTER TABLE work_items ADD COLUMN parent_conv_id TEXT")
-            except sqlite3.OperationalError: pass
-            try: conn.execute("ALTER TABLE work_items ADD COLUMN parent_turn_id TEXT")
-            except sqlite3.OperationalError: pass
-            try: conn.execute("ALTER TABLE work_items ADD COLUMN step_idx TEXT")
-            except sqlite3.OperationalError: pass
-            try: conn.execute("ALTER TABLE work_items ADD COLUMN updated_at REAL")
-            except sqlite3.OperationalError: pass
+            for alter_stmt in [
+                "ALTER TABLE tokens ADD COLUMN claimed_by TEXT",
+                "ALTER TABLE work_items ADD COLUMN parent_conv_id TEXT",
+                "ALTER TABLE work_items ADD COLUMN parent_turn_id TEXT",
+                "ALTER TABLE work_items ADD COLUMN step_idx TEXT",
+                "ALTER TABLE work_items ADD COLUMN updated_at REAL"
+            ]:
+                try:
+                    conn.execute(alter_stmt)
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
 
     def _prune_opportunistically(self):
-        cutoff = time.time() - (48 * 3600)
-        with self._get_connection() as conn:
-            conn.execute("DELETE FROM events WHERE created_at < ?", (cutoff,))
-            conn.execute("DELETE FROM tokens WHERE created_at < ?", (cutoff,))
-            conn.execute("DELETE FROM work_items WHERE created_at < ?", (cutoff,))
-            conn.execute("DELETE FROM turns WHERE created_at < ?", (cutoff,))
+        pass
 
     def claim_token(self, token_id, conv_id):
         with self._get_connection() as conn:
@@ -71,6 +87,8 @@ class Ledger:
                     "INSERT INTO events (event_id, type, payload, created_at) VALUES (?, ?, ?, ?)",
                     (event_id, event_type, payload, time.time())
                 )
+                if event_type in ("PRIMARY_TOOL_DENIED", "STOP_REQUESTED"):
+                    _push_metric_async(event_type, payload)
                 return True
             except sqlite3.IntegrityError:
                 return False

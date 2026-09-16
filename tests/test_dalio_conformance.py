@@ -5,9 +5,12 @@ Verifies role schemas, command validator policies (including P0), AST error supp
 """
 import sys
 import os
+import io
 import ast
 import json
 import uuid
+import importlib
+import importlib.util
 import pytest
 
 PLUGIN_ROOT = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
@@ -230,3 +233,151 @@ class TestDeployPlugin:
     def test_bundle_verification(self):
         ok, missing = deploy_plugin.verify_source_bundle(PLUGIN_ROOT)
         assert ok, f"Source bundle incomplete: missing {missing}"
+
+class TestIdentityAndCommandRemediation:
+    def test_p0_identity_inversion_prevention(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AGY_APP_DATA_DIR", str(tmp_path))
+        import ledger
+        import common
+        importlib.reload(ledger)
+        importlib.reload(common)
+
+        l = ledger.Ledger()
+        token = str(uuid.uuid4())
+        parent_conv_id = "parent-conv-123"
+        child_conv_id = "child-conv-456"
+
+        with l._get_connection() as conn:
+            conn.execute("INSERT INTO tokens (token_id) VALUES (?)", (token,))
+
+        payload = {
+            "token": token,
+            "may_delegate": False,
+            "remaining_depth": 0,
+            "parent_conv_id": parent_conv_id,
+            "parent_turn_id": "1"
+        }
+        l.insert_event(parent_conv_id, "1", "PreToolUse", "0", token, "WORK_PREPARED", json.dumps(payload))
+
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            f'{{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Execute task\\n\\n[ANTIGRAVITY_TOKEN:{token}]"}}\n'
+        )
+
+        parent_data = {
+            "conversationId": parent_conv_id,
+            "transcriptPath": str(transcript)
+        }
+        is_sub_parent, _, _, _, _ = common.is_subagent(parent_data)
+        assert is_sub_parent is False, "Parent conversation must NOT be recognized as a subagent"
+
+        child_data = {
+            "conversationId": child_conv_id,
+            "transcriptPath": str(transcript)
+        }
+        is_sub_child, may_del, depth, p_conv, p_turn = common.is_subagent(child_data)
+        assert is_sub_child is True, "Child conversation must be recognized as subagent"
+        assert p_conv == parent_conv_id
+        assert p_turn == "1"
+
+    def test_subagent_command_validation_enforced(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AGY_APP_DATA_DIR", str(tmp_path))
+        import ledger
+        import common
+        importlib.reload(ledger)
+        importlib.reload(common)
+
+        l = ledger.Ledger()
+        token = str(uuid.uuid4())
+        parent_conv_id = "parent-conv-123"
+        child_conv_id = "child-conv-456"
+
+        with l._get_connection() as conn:
+            conn.execute("INSERT INTO tokens (token_id) VALUES (?)", (token,))
+
+        payload = {
+            "token": token,
+            "may_delegate": False,
+            "remaining_depth": 0,
+            "parent_conv_id": parent_conv_id,
+            "parent_turn_id": "1"
+        }
+        l.insert_event(parent_conv_id, "1", "PreToolUse", "0", token, "WORK_PREPARED", json.dumps(payload))
+
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            f'{{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do work\\n\\n[ANTIGRAVITY_TOKEN:{token}]"}}\n'
+        )
+
+        spec = importlib.util.spec_from_file_location(
+            "enforce_delegation",
+            os.path.join(SCRIPTS_DIR, "enforce-delegation.py")
+        )
+        enforce_mod = importlib.util.module_from_spec(spec)
+        sys.modules["enforce_delegation"] = enforce_mod
+        spec.loader.exec_module(enforce_mod)
+
+        def run_hook(data):
+            stdin = io.StringIO(json.dumps(data))
+            stdout = io.StringIO()
+            enforce_mod.main(argv=["enforce-delegation.py"], stdin=stdin, stdout=stdout)
+            return json.loads(stdout.getvalue().strip())
+
+        # Subagent trying to run forbidden python inline code
+        bad_payload_python = {
+            "conversationId": child_conv_id,
+            "transcriptPath": str(transcript),
+            "toolCall": {
+                "name": "run_command",
+                "args": {
+                    "CommandLine": 'python3 -c "import os"',
+                    "Cwd": PLUGIN_ROOT
+                }
+            }
+        }
+        result = run_hook(bad_payload_python)
+        assert result["decision"] == "deny", f"Expected deny for python3 -c, got: {result}"
+        assert "Attention Guard Command Policy Violation" in result.get("reason", "")
+
+        # Subagent trying to run forbidden shell operator
+        bad_payload_pipe = {
+            "conversationId": child_conv_id,
+            "transcriptPath": str(transcript),
+            "toolCall": {
+                "name": "run_command",
+                "args": {
+                    "CommandLine": "rtk pytest tests/test_dalio_conformance.py | cat",
+                    "Cwd": PLUGIN_ROOT
+                }
+            }
+        }
+        result = run_hook(bad_payload_pipe)
+        assert result["decision"] == "deny", f"Expected deny for shell operator, got: {result}"
+        assert "Attention Guard Command Policy Violation" in result.get("reason", "")
+
+
+def test_two_tiered_escalation():
+    agents_rule_path = os.path.join(PLUGIN_ROOT, "rules", "AGENTS.md")
+    assert os.path.exists(agents_rule_path), "rules/AGENTS.md must exist in Attention Guard"
+    with open(agents_rule_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Verify rule identity
+    assert '<rule name="agent-delegation">' in content
+
+    # Verify Section 1 preservation
+    assert "### 1. Subagent Model Selection Framework" in content
+    assert "flash_lite" in content
+
+    # Verify Section 2 Two-Tiered Escalation Protocol
+    assert "Tier 1: Read-Only Pro Diagnostician" in content
+    assert "Tier 2: WorkBuddy External Second-Opinion" in content
+    assert "escalation_counter >= 3" in content
+    assert 'explicit human approval ("Proceed")' in content
+
+    # Verify Section 3 preservation
+    assert "### 3. Subagent Liveness Tracking" in content
+    assert 'schedule(DurationSeconds=300' in content
+
+    # Verify Section 4 preservation
+    assert "### 4. Subagent Termination Cleanup" in content

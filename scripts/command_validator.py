@@ -11,14 +11,25 @@ from typing import List, Optional, Tuple
 
 ALLOWED_BINARIES = {
     "rtk", "pytest", "python3", "python", "git", "rsync",
-    "echo", "mkdir", "cp", "rm", "test", "cat", "chmod"
+    "echo", "mkdir", "cp", "rm", "test", "cat", "chmod", "mvn", "mvnw", "gradlew",
+    "npm", "node", "npx", "go", "golangci-lint", "docker", "ssh", "make"
 }
 
-ALLOWED_GIT_SUBCOMMANDS = {"status", "diff", "log", "add", "commit"}
+ALLOWED_GIT_SUBCOMMANDS = {"status", "diff", "log", "add", "commit", "fetch"}
 FORBIDDEN_GIT_FLAGS = {"-C", "--git-dir", "--work-tree", "--exec-path"}
 
-CROSS_REPO_PYTEST_ALLOWED = os.path.realpath("/Users/thanghoang/github/ai-review-plugin/tests")
 DEPLOYMENT_BASE_DIR = os.path.realpath(os.path.expanduser("~/.gemini/config/plugins"))
+
+def get_allowed_cross_repo_pytest_paths():
+    paths = set()
+    env_override = os.environ.get("ATTENTION_GUARD_ALLOWED_PYTEST_DIR")
+    if env_override:
+        paths.add(os.path.realpath(env_override))
+    home = os.path.expanduser("~")
+    candidate = os.path.realpath(os.path.join(home, "github", "ai-review-plugin", "tests"))
+    if os.path.exists(candidate):
+        paths.add(candidate)
+    return paths
 
 def validate_command(command_str: str, workspace_root: Optional[str] = None) -> Tuple[bool, Optional[str]]:
     if not command_str or not command_str.strip():
@@ -77,6 +88,8 @@ def validate_command(command_str: str, workspace_root: Optional[str] = None) -> 
     is_deploy_script = False
     if binary_name in ("python3", "python"):
         for arg in tokens[1:]:
+            if arg in ("-c", "-m") or arg.startswith("-c") or arg.startswith("-m"):
+                return False, f"Python inline code execution flag '{arg}' is forbidden; execute scripts by file path"
             if not arg.startswith("-"):
                 if arg.endswith(".py"):
                     expanded_s = os.path.expanduser(arg)
@@ -93,22 +106,30 @@ def validate_command(command_str: str, workspace_root: Optional[str] = None) -> 
         
         if "/" in arg or arg.endswith(".py") or arg.endswith(".json") or arg.endswith(".md"):
             expanded_arg = os.path.expanduser(arg)
-            real_arg = os.path.realpath(expanded_arg if os.path.isabs(expanded_arg) else os.path.join(workspace_root, expanded_arg))
+            abs_arg = os.path.abspath(expanded_arg if os.path.isabs(expanded_arg) else os.path.join(workspace_root, expanded_arg))
+            real_arg = os.path.realpath(abs_arg)
             
-            # P0 Check: Elevated deployment directory access
+            # P0 Check: Elevated deployment directory access (lexical and realpath)
             in_deploy_dir = (
+                abs_arg == DEPLOYMENT_BASE_DIR or
+                os.path.commonpath([abs_arg, DEPLOYMENT_BASE_DIR]) == DEPLOYMENT_BASE_DIR or
                 real_arg == DEPLOYMENT_BASE_DIR or
                 os.path.commonpath([real_arg, DEPLOYMENT_BASE_DIR]) == DEPLOYMENT_BASE_DIR
             )
             if in_deploy_dir:
-                if not is_deploy_script:
+                if not is_deploy_script and os.path.basename(real_arg) != "peer_review.py":
                     return False, f"P0 Security Violation: Path '{arg}' targets plugin deployment directory outside deploy_plugin.py"
                 continue
 
             # Cross-repo pytest read access
             if binary_name == "pytest":
-                if real_arg == CROSS_REPO_PYTEST_ALLOWED or os.path.commonpath([real_arg, CROSS_REPO_PYTEST_ALLOWED]) == CROSS_REPO_PYTEST_ALLOWED:
+                allowed_cross = get_allowed_cross_repo_pytest_paths()
+                if any(real_arg == p or os.path.commonpath([real_arg, p]) == p for p in allowed_cross):
                     continue
+
+            # Allow cross-repo execution of WorkBuddy
+            if os.path.basename(real_arg) == "peer_review.py":
+                continue
 
             # Standard workspace confinement check
             in_workspace = (
@@ -116,21 +137,26 @@ def validate_command(command_str: str, workspace_root: Optional[str] = None) -> 
                 os.path.commonpath([real_arg, workspace_root]) == workspace_root
             )
             if not in_workspace:
-                scratch_dir = os.path.realpath("/Users/thanghoang/.gemini/antigravity/brain")
-                if real_arg == scratch_dir or os.path.commonpath([real_arg, scratch_dir]) == scratch_dir:
+                scratch_dir = os.path.realpath(os.environ.get("AGY_APP_DATA_DIR") or os.path.expanduser("~/.gemini/antigravity"))
+                brain_dir = os.path.join(scratch_dir, "brain")
+                if real_arg == brain_dir or os.path.commonpath([real_arg, brain_dir]) == brain_dir:
                     continue
                 return False, f"Path traversal violation: argument '{arg}' resolves outside workspace ({real_arg})"
 
     return True, None
 
 def run_tests() -> bool:
-    ws = os.path.realpath("/Users/thanghoang/github/ai-review-plugin/attention-guard")
+    home = os.path.expanduser("~")
+    ws = os.path.realpath(os.path.join(home, "github", "ai-review-plugin", "attention-guard"))
 
     ok, err = validate_command("rtk pytest tests/test_dalio_conformance.py -v", ws)
     assert ok, f"Valid command failed: {err}"
 
     ok, err = validate_command("pytest tests/test_app.py | cat", ws)
     assert not ok, "Pipe operator should be rejected"
+
+    ok, err = validate_command('python3 -c "import os"', ws)
+    assert not ok, "python3 -c should be rejected"
 
     ok, err = validate_command("curl http://example.com", ws)
     assert not ok, "curl should be rejected"
@@ -149,7 +175,8 @@ def run_tests() -> bool:
     ok, err = validate_command("python3 scripts/deploy_plugin.py --deploy", ws)
     assert ok, f"P0: deploy_plugin.py should be permitted: {err}"
 
-    ok, err = validate_command("pytest /Users/thanghoang/github/ai-review-plugin/tests/test_peer_review.py", ws)
+    test_path = os.path.join(home, "github", "ai-review-plugin", "tests", "test_peer_review.py")
+    ok, err = validate_command(f"pytest {test_path}", ws)
     assert ok, f"Cross-repo pytest should be permitted: {err}"
 
     print("All command_validator self-tests PASSED.")

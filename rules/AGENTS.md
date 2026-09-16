@@ -26,9 +26,10 @@ Enforces Ray Dalio's 5-Step Process (Clear Goals, Problem Intolerance, Root Caus
 
 ### 2. Escalation Protocol & State Machine
 1. On executor failure, increment `escalation_counter` (keyed by unique `execution_attempt_id`).
-2. Dispatch a `pro` Diagnostician with read-only tools to investigate evidence and produce a structured diagnosis payload (`schemas/diagnostician-payload.json`).
-3. If diagnosis is determined and `escalation_counter < 3`, amend the implementation plan in Phase 1 and seek human approval before re-executing.
-4. If `escalation_counter >= 3` or diagnosis is inconclusive, transition directly to human escalation. Reset counter to 0 only upon explicit human guidance.
+2. Dispatch a read-only `pro` Diagnostician (Tier 1: Read-Only Pro Diagnostician) on failure attempt 1 (`escalation_counter == 1`) with read-only tools to isolate root causes (`schemas/diagnostician-payload.json`).
+3. If diagnosis is determined and `escalation_counter < 3`, amend the implementation plan in Phase 1 and seek explicit human approval ("Proceed") before any re-execution attempt.
+4. If diagnosis is ambiguous or execution fails a second time (`escalation_counter >= 2`), dispatch WorkBuddy AI (Tier 2: WorkBuddy External Second-Opinion) via `peer_review.py` with `--diagnostic-context` and `--output-file diagnostic_review.json`. Tier 2 feeds diagnostic hypotheses back into Step 4 plan amendment, requiring explicit human approval ("Proceed") before re-executing.
+5. If execution fails a third time (`escalation_counter >= 3`) or diagnosis remains inconclusive, stop autonomous looping and transition directly to human escalation (Dalio Human Gate). Reset counter to 0 only upon explicit human guidance.
 
 ### 3. Subagent Liveness Tracking
 - When spawning subagents, the Primary Agent MUST ALWAYS arm a 300s liveness timer via `schedule(DurationSeconds=300, TimerCondition="any")`.

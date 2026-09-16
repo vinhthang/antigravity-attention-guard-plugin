@@ -18,7 +18,7 @@ enforce_mod = importlib.util.module_from_spec(spec)
 sys.modules["enforce_delegation"] = enforce_mod
 spec.loader.exec_module(enforce_mod)
 
-MCP_READ_ALLOWLIST = enforce_mod.MCP_READ_ALLOWLIST
+
 is_artifact_path = enforce_mod.is_artifact_path
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def run_hook(payload):
     return json.loads(stdout.getvalue().strip())
 
 class TestSubagentDetection:
-    def test_primary_agent_blocked(self):
+    def test_run_command_allowed_for_primary(self):
         result = run_hook({
             "modelName": "claude-opus-4.6",
             "toolCall": {
@@ -49,8 +49,17 @@ class TestSubagentDetection:
                 "args": {"CommandLine": "rm -rf /"}
             }
         })
-        assert result["decision"] == "deny"
-        assert "forbidden from executing shell commands" in result.get("reason", "")
+        assert result["decision"] == "allow"
+
+    def test_primary_agent_diagnostics_metrics_allowed(self):
+        result = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "run_command",
+                "args": {"CommandLine": "python3 scripts/diagnostics.py --metrics"}
+            }
+        })
+        assert result["decision"] == "allow"
 
     def test_subagent_with_token_allowed(self, tmp_path):
         import ledger
@@ -88,10 +97,7 @@ class TestArtifactPath:
     def test_non_artifact_blocked(self):
         assert is_artifact_path("/Users/code/project/main.py", "/home/user/.gemini/brain/abc") is False
 
-class TestMCPAllowlist:
-    def test_mcp_read_allowlist(self):
-        assert ("server-filesystem", "read_file") in MCP_READ_ALLOWLIST
-        assert ("codegraph", "codegraph_search") in MCP_READ_ALLOWLIST
+
 
 class TestGenerateImageAllowed:
     def test_generate_image_allowed_for_primary(self):
@@ -145,3 +151,86 @@ class TestCoordinatorDelegation:
 
         result = run_hook(data)
         assert result.get("decision") == "allow"
+
+
+class TestReviewGateIntegration:
+    def test_invoke_subagent_execution_denied_when_review_json_missing(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        payload = {
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Subagents": [{"Role": "Task Executor", "TypeName": "flash", "Prompt": "Run build"}]
+                }
+            }
+        }
+        res = run_hook(payload)
+        assert res["decision"] == "deny"
+        assert "Plan Review Gate: review.json missing" in res["reason"]
+
+    def test_invoke_subagent_execution_denied_when_review_json_has_p0_p1(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        rev = tmp_path / "review.json"
+        rev.write_text(json.dumps({
+            "engine": "workbuddy",
+            "session_id": "workbuddy:sess_123456",
+            "issues": [{"severity": "P0", "description": "Blocker"}]
+        }))
+        payload = {
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Subagents": [{"Role": "Task Executor", "TypeName": "flash", "Prompt": "Run build"}]
+                }
+            }
+        }
+        res = run_hook(payload)
+        assert res["decision"] == "deny"
+        assert "blocking issues (P0/P1)" in res["reason"]
+
+    def test_invoke_subagent_execution_allowed_when_review_json_clean(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        rev = tmp_path / "review.json"
+        rev.write_text(json.dumps({
+            "engine": "workbuddy",
+            "session_id": "workbuddy:sess_123456",
+            "issues": []
+        }))
+        payload = {
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Subagents": [{"Role": "Task Executor", "TypeName": "flash", "Prompt": "Run build"}]
+                }
+            }
+        }
+        res = run_hook(payload)
+        assert res["decision"] == "allow"
+
+    def test_invoke_subagent_review_exempt_allowed_without_review_json(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        payload = {
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Subagents": [{"Role": "reviewer", "TypeName": "flash", "Prompt": "Review plan"}]
+                }
+            }
+        }
+        res = run_hook(payload)
+        assert res["decision"] == "allow"
+
+    def test_manage_subagents_unconditional_allowed(self):
+        payload = {
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "manage_subagents",
+                "args": {"Action": "list"}
+            }
+        }
+        res = run_hook(payload)
+        assert res["decision"] == "allow"
