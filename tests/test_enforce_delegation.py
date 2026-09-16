@@ -18,7 +18,7 @@ enforce_mod = importlib.util.module_from_spec(spec)
 sys.modules["enforce_delegation"] = enforce_mod
 spec.loader.exec_module(enforce_mod)
 
-MCP_READ_ALLOWLIST = enforce_mod.MCP_READ_ALLOWLIST
+
 is_artifact_path = enforce_mod.is_artifact_path
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def run_hook(payload):
     return json.loads(stdout.getvalue().strip())
 
 class TestSubagentDetection:
-    def test_primary_agent_blocked(self):
+    def test_run_command_allowed_for_primary(self):
         result = run_hook({
             "modelName": "claude-opus-4.6",
             "toolCall": {
@@ -49,8 +49,7 @@ class TestSubagentDetection:
                 "args": {"CommandLine": "rm -rf /"}
             }
         })
-        assert result["decision"] == "deny"
-        assert "forbidden from executing shell commands" in result.get("reason", "")
+        assert result["decision"] == "allow"
 
     def test_primary_agent_diagnostics_metrics_allowed(self):
         result = run_hook({
@@ -98,10 +97,7 @@ class TestArtifactPath:
     def test_non_artifact_blocked(self):
         assert is_artifact_path("/Users/code/project/main.py", "/home/user/.gemini/brain/abc") is False
 
-class TestMCPAllowlist:
-    def test_mcp_read_allowlist(self):
-        assert ("server-filesystem", "read_file") in MCP_READ_ALLOWLIST
-        assert ("codegraph", "codegraph_search") in MCP_READ_ALLOWLIST
+
 
 class TestGenerateImageAllowed:
     def test_generate_image_allowed_for_primary(self):

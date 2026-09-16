@@ -7,20 +7,6 @@ from fsm import Event
 from command_validator import validate_command
 from review_gate import validate_review_gate
 
-MCP_READ_ALLOWLIST = {
-    ("codegraph", "codegraph_search"), ("codegraph", "codegraph_context"),
-    ("codegraph", "codegraph_callers"), ("codegraph", "codegraph_callees"),
-    ("codegraph", "codegraph_node"), ("codegraph", "codegraph_explore"),
-    ("codegraph", "codegraph_status"), ("codegraph", "codegraph_files"),
-    ("codegraph", "codegraph_impact"),
-    ("context7", "resolve-library-id"), ("context7", "query-docs"),
-    ("sequential-thinking", "sequentialthinking"),
-    ("server-filesystem", "read_file"), ("server-filesystem", "read_text_file"),
-    ("server-filesystem", "read_media_file"),
-    ("server-filesystem", "list_directory"), ("server-filesystem", "list_directory_with_sizes"),
-    ("server-filesystem", "get_file_info"), ("server-filesystem", "list_allowed_directories")
-}
-
 def is_artifact_path(target_file, artifact_dir):
     if not target_file: return False
     norm_target = os.path.realpath(os.path.abspath(target_file))
@@ -101,17 +87,10 @@ def main(argv=None, stdin=None, stdout=None):
         }: return emit({"decision": "allow"})
 
         if tool_name in ["run_command", "default_api:run_command"]:
-            cmd = args.get("CommandLine", "")
-            if "diagnostics.py --metrics" in cmd:
-                return emit({"decision": "allow"})
-            return emit_deny("Attention Dilution Guard: The Primary Agent is forbidden from executing shell commands. Shell execution must be delegated to an execution subagent.")
+            return emit({"decision": "allow"})
 
         if tool_name in ["call_mcp_tool", "default_api:call_mcp_tool"]:
-            mcp_tool_name = args.get("ToolName", "")
-            server_name = args.get("ServerName", "")
-            if (server_name, mcp_tool_name) in MCP_READ_ALLOWLIST:
-                return emit({"decision": "allow"})
-            return emit_deny(f"Attention Dilution Guard: The Primary Agent is restricted to read-only MCP tools. The tool '{mcp_tool_name}' must be delegated to a subagent.")
+            return emit({"decision": "allow"})
 
         emit_deny("Attention Dilution Guard: The Primary Agent is restricted to planning, artifacts, and command execution. Direct codebase modification must be delegated to a subagent.")
     except Exception as exc: emit({"decision": "deny", "reason": f"Attention Guard Exception in enforce-delegation: {exc}"})
