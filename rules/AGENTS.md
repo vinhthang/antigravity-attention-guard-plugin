@@ -19,6 +19,9 @@ Enforces Ray Dalio's 5-Step Process (Clear Goals, Problem Intolerance, Root Caus
   - Subagents MUST return strict, valid JSON conforming to role schemas in `schemas/`.
   - Every payload MUST include an immutable `execution_attempt_id` (UUID format).
   - Executor summaries MUST NOT exceed 1200 characters.
+  - **Payload Validation**: Upon receiving a subagent response, the Primary Agent MUST validate the returned JSON using:
+    `rtk python3 scripts/payload_validator.py --role <executor|diagnostician|coordinator> --payload '<json>'`
+  - If validation fails, treat it as a structural failure (`failure_kind: PAYLOAD_SCHEMA_VIOLATION`) and trigger Step 3 Root Cause Diagnosis.
 </constraints>
 
 <instructions>

@@ -9,7 +9,7 @@ Key Workflow Guidelines:
 - Adaptive Planning: Multi-step architecture features and refactors require implementation_plan.md and human approval ('Proceed') before subagent execution. Quick one-offs may proceed directly.
 - Problem Intolerance: Zero error suppression. No silent swallows or bare pass.
 - Root Cause Diagnosis: On subagent failure, dispatch pro Diagnostician (read-only, max 3 escalations).
-- Execution Accountability: Delegate implementation to subagents; subagents must conform to schemas with execution_attempt_id.
+- Execution Accountability: Subagents must return strict JSON schemas. Validate payloads using `rtk python3 scripts/payload_validator.py --role <role> --payload '<json>'`.
 
 Continue with your current task."""
 

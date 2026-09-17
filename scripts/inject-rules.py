@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys, os, json, uuid, time
 sys.path.insert(0, os.path.dirname(__file__))
-from common import get_cache_dir, is_subagent, get_turn_state
+from common import is_subagent, get_turn_state
 from ledger import Ledger
 
 def main(argv=None, stdin=None, stdout=None):

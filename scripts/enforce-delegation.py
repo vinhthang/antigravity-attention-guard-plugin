@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys, os, json
 sys.path.insert(0, os.path.dirname(__file__))
-from common import is_subagent, get_cache_dir, get_turn_state
+from common import is_subagent, get_turn_state
 from ledger import Ledger
 from fsm import Event
 from command_validator import validate_command
