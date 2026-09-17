@@ -41,5 +41,14 @@
         "timeout": 5
       }
     ]
+  },
+  "attention-guard-refresh": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "/usr/bin/env python3 ./scripts/attention-refresh.py",
+        "timeout": 5
+      }
+    ]
   }
 }

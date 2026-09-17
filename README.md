@@ -87,7 +87,8 @@ Aligned with Ray Dalio's principles in [`rules/AGENTS.md`](rules/AGENTS.md):
 
 | Hook | Matcher | Script | Responsibility |
 |---|---|---|---|
-| `PreToolUse` | `.*` | [`scripts/enforce-delegation.py`](scripts/enforce-delegation.py) | Blocks direct codebase editing by Primary Agent; enforces command policy and workspace confinement on subagents. |
+| `PreInvocation` | - | [`scripts/attention-refresh.py`](scripts/attention-refresh.py) | Periodically injects ephemeral workflow reminders to keep rules salient in long pairing sessions. |
+| `PreToolUse` | `.*` | [`scripts/enforce-delegation.py`](scripts/enforce-delegation.py) | Unblocks Primary Agent; enforces command policy and workspace confinement on subagents. |
 | `PreToolUse` | `invoke_subagent` | [`scripts/inject-rules.py`](scripts/inject-rules.py) | Issues tokens and injects Dalio rules and subagent contracts into prompts. |
 | `PostToolUse` | `invoke_subagent` | [`scripts/record-tool-result.py`](scripts/record-tool-result.py) | Records dispatch outcome and updates state machine in SQLite ledger. |
 | `Stop` | - | [`scripts/attention-check.py`](scripts/attention-check.py) | Verifies walkthrough completion, handles subagent termination, and enforces turn closure invariants. |
