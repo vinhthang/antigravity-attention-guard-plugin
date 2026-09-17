@@ -182,6 +182,10 @@ class TestCommandValidator:
         ok, err = command_validator.validate_command("git status", ws)
         assert ok, f"Expected git status valid, got: {err}"
 
+        for tool_cmd in ["cargo test", "pnpm test", "uv run pytest", "dotnet test"]:
+            ok, err = command_validator.validate_command(tool_cmd, ws)
+            assert ok, f"Expected '{tool_cmd}' to be allowed, got error: {err}"
+
     def test_shell_operators_forbidden(self):
         ws = PLUGIN_ROOT
         for op in ["|", ">", ">>", "<", ";", "&&", "||"]:
@@ -211,10 +215,14 @@ class TestCommandValidator:
 
     def test_destructive_binaries_forbidden(self):
         ws = PLUGIN_ROOT
-        for b in ["rm", "chmod"]:
+        for b in ["rm", "chmod", "del", "format", "icacls"]:
             ok, err = command_validator.validate_command(f"{b} file.txt", ws)
             assert not ok, f"Binary '{b}' should be rejected"
-            assert "not in allowed binary whitelist" in str(err)
+            assert "strictly forbidden by security policy" in str(err)
+
+        ok, err = command_validator.validate_command('powershell.exe -c "Get-Process"', ws)
+        assert not ok, "powershell.exe -c should be rejected"
+        assert "Direct execution of shell script/eval" in str(err)
 
     def test_p0_security_elevated_deployment_boundary(self):
         ws = PLUGIN_ROOT

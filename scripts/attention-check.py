@@ -148,35 +148,22 @@ def main(argv=None, stdin=None, stdout=None):
             with ledger._get_connection() as conn:
                 cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status NOT IN ('TERMINATED', 'FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
                 active_count = cursor.fetchone()[0]
-                cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
-                total_count = cursor.fetchone()[0]
+                cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status IN ('FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
+                failure_count = cursor.fetchone()[0]
 
-            if total_count > 0 and active_count == 0:
-                with ledger._get_connection() as conn:
-                    cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status IN ('FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
-                    failure_count = cursor.fetchone()[0]
-                if failure_count == 0:
-                    if not check_walkthrough_requirement(payload, conv_id):
-                        rejection_count = increment_rejection_count(tracker)
-                        if rejection_count >= MAX_STOP_REJECTIONS:
-                            reset_rejection_count(tracker)
-                            return emit({"decision": "allow"})
-                        return emit({
-                            "decision": "continue",
-                            "reason": f"Attention Guard Walkthrough Gate: Subagents executed work, but walkthrough.md has not been generated or updated. Create or update walkthrough.md to document changes before completing the turn. (Retry {rejection_count}/{MAX_STOP_REJECTIONS})"
-                        })
-                    ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False, "auto_recovered": True}))
-                    ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
-                    reset_rejection_count(tracker)
-                    return emit({"decision": "allow"})
+            if active_count == 0 and failure_count == 0:
+                ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False, "auto_recovered": True}))
+                ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
+                reset_rejection_count(tracker)
+                return emit({"decision": "allow"})
 
             rejection_count = get_rejection_count(tracker)
             if rejection_count >= MAX_STOP_REJECTIONS:
                 reset_rejection_count(tracker)
                 ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"retries_exhausted": True}))
                 return emit({"decision": "allow"})
-            rejection_count = increment_rejection_count(tracker)
-            return emit({"decision": "continue", "reason": f"Attention Guard Refresh: Remember you are the Primary Agent. Delegate all execution to subagents. (Retry {rejection_count}/{MAX_STOP_REJECTIONS})"})
+            increment_rejection_count(tracker)
+            return emit({"decision": "continue", "reason": "Attention Guard Recovery: Subagent execution failed or timed out. Diagnose and recover before completing."})
     except Exception as exc:
         sys.stderr.write(f"Warning: {exc}\n")
     emit({"decision": "allow"})

@@ -5,20 +5,52 @@ Enforces binary whitelisting, argument policy, path confinement, and P0 deployme
 """
 import sys
 import os
+import json
 import shlex
 import argparse
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Set
 
 ALLOWED_BINARIES = {
-    "rtk", "pytest", "python3", "python", "git", "rsync",
-    "echo", "mkdir", "cp", "test", "cat", "mvn", "mvnw", "gradlew",
-    "npm", "node", "npx", "go", "golangci-lint", "docker", "ssh", "make"
+    "rtk", "pytest", "python3", "python", "git", "rsync", "echo", "mkdir", "cp",
+    "test", "cat", "mvn", "mvnw", "gradle", "gradlew", "npm", "node", "npx",
+    "pnpm", "yarn", "bun", "deno", "vite", "go", "golangci-lint", "cargo",
+    "rustc", "make", "cmake", "ninja", "gcc", "clang", "zig", "dotnet",
+    "msbuild", "docker", "kubectl", "helm", "terraform", "tofu", "ssh", "uv",
+    "poetry", "pip", "ruff", "mypy", "ls", "grep", "find", "diff", "head",
+    "tail", "wc", "sed", "awk", "which", "dir", "copy", "findstr", "type", "where"
+}
+
+FORBIDDEN_BINARIES = {
+    "rm", "unlink", "shred", "del", "erase", "rmdir", "rd", "format",
+    "diskpart", "mkfs", "dd", "fdisk", "chmod", "chown", "chgrp",
+    "icacls", "cacls", "takeown", "attrib", "sudo", "su", "doas", "runas"
 }
 
 ALLOWED_GIT_SUBCOMMANDS = {"status", "diff", "log", "add", "commit", "fetch", "push"}
 FORBIDDEN_GIT_FLAGS = {"-C", "--git-dir", "--work-tree", "--exec-path"}
 
 DEPLOYMENT_BASE_DIR = os.path.realpath(os.path.expanduser("~/.gemini/config/plugins"))
+
+def get_project_allowed_binaries(workspace_root: str) -> Set[str]:
+    allowed: Set[str] = set()
+    extra_env = os.environ.get("ATTENTION_GUARD_EXTRA_BINARIES")
+    if extra_env:
+        for b in extra_env.split(","):
+            b_clean = b.strip().lower()
+            if b_clean:
+                allowed.add(b_clean)
+    config_path = os.path.join(workspace_root, ".attentionguard.json")
+    if os.path.isfile(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                if isinstance(cfg, dict):
+                    for b in cfg.get("allowed_binaries", []):
+                        if isinstance(b, str) and b.strip():
+                            allowed.add(b.strip().lower())
+        except Exception as exc:
+            sys.stderr.write(f"Warning reading .attentionguard.json: {exc}\n")
+    return allowed
 
 def validate_command(command_str: str, workspace_root: Optional[str] = None) -> Tuple[bool, Optional[str]]:
     if not command_str or not command_str.strip():
@@ -48,16 +80,28 @@ def validate_command(command_str: str, workspace_root: Optional[str] = None) -> 
     if not tokens:
         return False, "Command contains only rtk wrapper"
 
-    binary = tokens[0]
-    binary_name = os.path.basename(binary)
+    binary_raw = tokens[0]
+    binary_name = os.path.basename(binary_raw).lower()
+    for ext in (".exe", ".cmd", ".bat"):
+        if binary_name.endswith(ext):
+            binary_name = binary_name[:-len(ext)]
+            break
 
-    # 3. Check binary whitelist
-    if binary_name not in ALLOWED_BINARIES:
+    # 3. Check FORBIDDEN_BINARIES
+    if binary_name in FORBIDDEN_BINARIES:
+        return False, f"Binary '{binary_name}' is strictly forbidden by security policy"
+
+    # 4. Check shell execution patterns
+    if binary_name in ("bash", "sh", "zsh", "csh", "ksh", "eval", "cmd", "powershell", "pwsh", "wscript", "cscript", "mshta"):
+        for arg in tokens[1:]:
+            arg_l = arg.lower()
+            if arg_l in ("-c", "/c", "-enc", "-command") or arg_l.startswith("-c") or arg_l.startswith("/c"):
+                return False, f"Direct execution of shell script/eval via '{binary_name}' is forbidden"
+
+    # 5. Check allowed binary whitelist
+    effective_allowed = ALLOWED_BINARIES | get_project_allowed_binaries(workspace_root)
+    if binary_name not in effective_allowed:
         return False, f"Binary '{binary_name}' is not in allowed binary whitelist"
-
-    # 4. Check forbidden execution patterns
-    if binary_name in ("bash", "sh", "zsh", "eval", "sudo"):
-        return False, f"Direct invocation of shell interpreter '{binary_name}' is forbidden"
 
     # 5. Git subcommand policy
     if binary_name == "git":
@@ -160,6 +204,33 @@ def run_tests() -> bool:
 
     ok, err = validate_command("chmod 777 test.sh", ws)
     assert not ok, "chmod should be rejected"
+
+    # Multi-ecosystem allowed tools
+    ok, err = validate_command("cargo test", ws)
+    assert ok, f"cargo test should be allowed: {err}"
+
+    ok, err = validate_command("pnpm test", ws)
+    assert ok, f"pnpm test should be allowed: {err}"
+
+    ok, err = validate_command("uv run", ws)
+    assert ok, f"uv run should be allowed: {err}"
+
+    # Destructive / shell execution rejected commands
+    ok, err = validate_command("del file.txt", ws)
+    assert not ok, "del should be rejected"
+    assert "strictly forbidden" in str(err)
+
+    ok, err = validate_command("format C:", ws)
+    assert not ok, "format should be rejected"
+    assert "strictly forbidden" in str(err)
+
+    ok, err = validate_command("icacls file /grant", ws)
+    assert not ok, "icacls should be rejected"
+    assert "strictly forbidden" in str(err)
+
+    ok, err = validate_command('powershell.exe -c "Get-Process"', ws)
+    assert not ok, "powershell.exe -c should be rejected"
+    assert "Direct execution of shell script/eval" in str(err)
 
     ok, err = validate_command("git status", ws)
     assert ok, f"git status failed: {err}"

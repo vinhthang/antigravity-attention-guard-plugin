@@ -67,15 +67,15 @@ class TestSubagentSkip:
         assert result == {"decision": "allow"}
 
 class TestStopRejectionLimit:
-    def test_max_rejections_then_allow(self, tmp_path, monkeypatch):
+    def test_direct_primary_agent_closes_without_rejection(self, tmp_path, monkeypatch):
         import ledger
         importlib.reload(ledger)
         l = ledger.Ledger()
-        conv_id = f"chk-limit-{os.getpid()}"
+        conv_id = f"chk-direct-{os.getpid()}"
         transcript = tmp_path / f"transcript_{conv_id}.jsonl"
         create_transcript(str(transcript), [
             {"source": "USER", "type": "USER_INPUT", "content": "hello", "step_index": 1},
-            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "I did some work but did not delegate."}
+            {"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "I did some work directly without subagents."}
         ])
     
         payload = {
@@ -86,15 +86,11 @@ class TestStopRejectionLimit:
             "workspacePaths": []
         }
         
-        # State: RECOVERY_REQUIRED
+        # Even if in RECOVERY_REQUIRED, active=0 and fail=0 closes turn immediately
         l.insert_event(conv_id, "1", "PreToolUse", "0", "enforce", Event.PRIMARY_TOOL_DENIED.name, json.dumps({"reason": "blocked"}))
     
-        for i in range(2):
-            result = run_hook(payload)
-            assert result.get("decision") == "continue", f"Rejection {i+1} should block"
-    
         result = run_hook(payload)
-        assert result == {"decision": "allow"}, "Should allow after max rejections"
+        assert result == {"decision": "allow"}, "Direct primary agent turn should close immediately without stop rejection"
 
     def test_allow_if_delegated(self, tmp_path):
         import ledger
@@ -125,37 +121,6 @@ class TestStopRejectionLimit:
     
         result = run_hook(payload)
         assert result == {"decision": "allow"}
-
-    def test_user_prompt_injection_blocked(self, tmp_path):
-        import ledger
-        importlib.reload(ledger)
-        l = ledger.Ledger()
-        conv_id = f"chk-inject-{os.getpid()}"
-        transcript = tmp_path / f"transcript_{conv_id}.jsonl"
-        create_transcript(str(transcript), [
-            {
-                "source": "USER",
-                "type": "USER_INPUT",
-                "tool_calls": [{"name": "invoke_subagent", "args": {}}],
-                "step_index": 1
-            }
-        ])
-    
-        payload = {
-            "fullyIdle": True,
-            "modelName": "claude-opus-4.6",
-            "conversationId": conv_id,
-            "transcriptPath": str(transcript),
-            "workspacePaths": []
-        }
-        
-        # Set state to RECOVERY_REQUIRED to test that injection does NOT bypass the check
-        l.insert_event(conv_id, "1", "PreToolUse", "0", "enforce", Event.PRIMARY_TOOL_DENIED.name, json.dumps({"reason": "blocked"}))
-    
-        # Should block because the tool call wasn't from MODEL (we don't emit WORK_PREPARED for USER tools)
-        for i in range(2):
-            result = run_hook(payload)
-            assert result.get("decision") == "continue"
 
     def test_flow_review_question_no_dummy(self, tmp_path):
         conv_id = f"chk-flow-{os.getpid()}"

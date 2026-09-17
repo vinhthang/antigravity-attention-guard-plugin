@@ -61,6 +61,25 @@ class TestSubagentDetection:
         })
         assert result["decision"] == "allow"
 
+    def test_primary_agent_write_and_replace_allowed(self):
+        res_write = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {"TargetFile": "/some/repo/file.py", "CodeContent": "print('hello')"}
+            }
+        })
+        assert res_write["decision"] == "allow"
+
+        res_replace = run_hook({
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {"TargetFile": "/some/repo/file.py", "TargetContent": "a", "ReplacementContent": "b"}
+            }
+        })
+        assert res_replace["decision"] == "allow"
+
     def test_subagent_with_token_allowed(self, tmp_path):
         import ledger
         importlib.reload(ledger)

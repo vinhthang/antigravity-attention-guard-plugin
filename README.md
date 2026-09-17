@@ -40,13 +40,17 @@ The plugin enforces **Ray Dalio's 5-Step Process** (Clear Goals, Problem Intoler
 
 ## Core Capabilities
 
-### 1. Primary Agent Attention Protection
-- **Role Separation**: The Primary Agent is barred from direct codebase file modification (`write_to_file`, `replace_file_content` outside artifacts).
-- **Clean Context Window**: Keeps the orchestrator focused on codebase exploration, requirements, planning artifacts (`implementation_plan.md`, `task.md`), and delegation.
+### 1. Adaptive Planning & Attention Protection
+- **Adaptive Workflow**:
+  - **Plan & Delegate**: Multi-step architecture features, complex refactors, and test-driven implementations author `implementation_plan.md` and pass through the Human Gate ("Proceed") before delegating execution to subagents.
+  - **Direct Execution**: Quick one-offs, single-file edits, configuration tweaks, and direct user prompts can be executed directly by the Primary Agent without plan overhead.
+- **Clean Context Window**: Keeps the orchestrator focused on codebase exploration, high-level requirements, planning artifacts, and workstream coordination.
 
-### 2. Subagent Sandbox & Command Security Firewall
+### 2. Cross-Platform Sandbox & Command Security Firewall
 Every terminal command run by subagents is filtered through [`command_validator.py`](scripts/command_validator.py):
-- **Binary Whitelist**: Only approved binaries (`git`, `python3`, `pytest`, `npm`, `node`, `go`, `docker`, `rtk`, etc.) can execute. Raw shell interpreters (`bash`, `sh`, `eval`) and destructive tools (`rm`, `chmod`) are forbidden.
+- **Expanded Multi-Ecosystem Whitelist**: Supports Python, Node/JS, Rust, Go, Java, .NET, C/C++, and DevOps tools out of the box (`cargo`, `rustc`, `pnpm`, `yarn`, `bun`, `deno`, `vite`, `uv`, `poetry`, `pip`, `ruff`, `mypy`, `dotnet`, `msbuild`, `mvn`, `gradle`, `go`, `docker`, `kubectl`, `helm`, `terraform`, `tofu`, `make`, `cmake`, `ninja`, `rtk`, `git`, etc.).
+- **Cross-Platform & Windows Compatibility**: Normalizes binary extensions (`.exe`, `.cmd`, `.bat`), blocks PowerShell/cmd script execution patterns (`powershell -c`, `cmd /c`), and enforces a strict `FORBIDDEN_BINARIES` list across Unix and Windows (`del`, `format`, `erase`, `rmdir`, `diskpart`, `mkfs`, `dd`, `icacls`, `takeown`, `rm`, `chmod`, `sudo`, `runas`).
+- **Project-Level Whitelisting**: Allows custom binaries via `ATTENTION_GUARD_EXTRA_BINARIES` environment variable or `.attentionguard.json` project configuration.
 - **Operator Blocking**: Unquoted shell operators (`|`, `>`, `>>`, `;`, `&&`, `||`) are blocked to prevent chained arbitrary execution.
 - **Workspace Confinement**: Commands cannot access or execute paths outside the workspace or scratch/brain directory.
 - **Branch Protection**: Feature branch pushes (e.g. `git push origin feat/...`) are permitted; direct pushes to `main` or `master` are strictly rejected.
@@ -131,6 +135,7 @@ rtk pytest tests/ -v
 |---|---|---|
 | macOS | ✅ Supported | Primary development platform |
 | Linux | ✅ Supported | `python3` required (standard on modern distributions) |
+| Windows | ✅ Supported | Cross-platform binary normalization (`.exe`, `.cmd`, `.bat`) & Windows security sandbox |
 
 ---
 

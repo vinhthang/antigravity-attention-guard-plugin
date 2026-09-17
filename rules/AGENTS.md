@@ -4,8 +4,11 @@ Enforces Ray Dalio's 5-Step Process (Clear Goals, Problem Intolerance, Root Caus
 </description>
 
 <constraints>
-- **Step 1: Set Clear Goals (Phase 1 / Primary Agent)**: You MUST define falsifiable acceptance criteria—including exact automated verification commands and expected exit states—before any execution subagents are dispatched.
-- **Step 4: Deterministic Design & Human Gate**: Author `implementation_plan.md` and track checklists in `task.md` (`- [ ]`). Execution is strictly gated behind explicit human approval ("Proceed"). No code mutations in Phase 1.
+- **Step 1: Set Clear Goals (Phase 1 / Primary Agent & Adaptive Planning)**:
+  - **Adaptive Planning Protocol**:
+    - **Plan & Delegate**: Multi-step architecture features, complex refactors, and test-driven implementations require `implementation_plan.md` and Human Gate ("Proceed") before subagent execution. You MUST define falsifiable acceptance criteria—including exact automated verification commands and expected exit states—before any execution subagents are dispatched.
+    - **Direct Execution**: Quick one-offs, single-file edits, configuration adjustments, and direct user prompts can be executed directly by the Primary Agent without plan overhead.
+- **Step 4: Deterministic Design & Human Gate**: Author `implementation_plan.md` and track checklists in `task.md` (`- [ ]`) for planned delegation workflows. Subagent execution is strictly gated behind explicit human approval ("Proceed"). Direct execution tasks proceed directly without plan overhead.
 - **Step 2: Identify & Don't Tolerate Problems (Phase 2 / Subagents)**: Strictly adhere to `rules/no-error-suppression.md`. Zero error suppression, no bare `pass`, and no silent failure swallows. Any command failure or assertion break is a structural blocker.
 - **Step 3: Root Cause Diagnosis Gate (Escalation Protocol)**:
   - When an executor subagent encounters a failure, the Primary Agent MUST dispatch a `pro` subagent as a **Diagnostician**.
