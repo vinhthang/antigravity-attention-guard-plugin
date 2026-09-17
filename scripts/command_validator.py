@@ -20,17 +20,6 @@ FORBIDDEN_GIT_FLAGS = {"-C", "--git-dir", "--work-tree", "--exec-path"}
 
 DEPLOYMENT_BASE_DIR = os.path.realpath(os.path.expanduser("~/.gemini/config/plugins"))
 
-def get_allowed_cross_repo_pytest_paths():
-    paths = set()
-    env_override = os.environ.get("ATTENTION_GUARD_ALLOWED_PYTEST_DIR")
-    if env_override:
-        paths.add(os.path.realpath(env_override))
-    home = os.path.expanduser("~")
-    candidate = os.path.realpath(os.path.join(home, "github", "ai-review-plugin", "tests"))
-    if os.path.exists(candidate):
-        paths.add(candidate)
-    return paths
-
 def validate_command(command_str: str, workspace_root: Optional[str] = None) -> Tuple[bool, Optional[str]]:
     if not command_str or not command_str.strip():
         return False, "Empty command string"
@@ -126,18 +115,8 @@ def validate_command(command_str: str, workspace_root: Optional[str] = None) -> 
                 os.path.commonpath([real_arg, DEPLOYMENT_BASE_DIR]) == DEPLOYMENT_BASE_DIR
             )
             if in_deploy_dir:
-                if not is_deploy_script and os.path.basename(real_arg) != "peer_review.py":
+                if not is_deploy_script:
                     return False, f"P0 Security Violation: Path '{arg}' targets plugin deployment directory outside deploy_plugin.py"
-                continue
-
-            # Cross-repo pytest read access
-            if binary_name == "pytest":
-                allowed_cross = get_allowed_cross_repo_pytest_paths()
-                if any(real_arg == p or os.path.commonpath([real_arg, p]) == p for p in allowed_cross):
-                    continue
-
-            # Allow cross-repo execution of WorkBuddy
-            if os.path.basename(real_arg) == "peer_review.py":
                 continue
 
             # Standard workspace confinement check
@@ -156,7 +135,7 @@ def validate_command(command_str: str, workspace_root: Optional[str] = None) -> 
 
 def run_tests() -> bool:
     home = os.path.expanduser("~")
-    ws = os.path.realpath(os.path.join(home, "github", "ai-review-plugin", "attention-guard"))
+    ws = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
 
     ok, err = validate_command("rtk pytest tests/test_dalio_conformance.py -v", ws)
     assert ok, f"Valid command failed: {err}"
@@ -195,7 +174,7 @@ def run_tests() -> bool:
 
     test_path = os.path.join(home, "github", "ai-review-plugin", "tests", "test_peer_review.py")
     ok, err = validate_command(f"pytest {test_path}", ws)
-    assert ok, f"Cross-repo pytest should be permitted: {err}"
+    assert not ok, "Cross-repo path outside workspace should be rejected"
 
     print("All command_validator self-tests PASSED.")
     return True

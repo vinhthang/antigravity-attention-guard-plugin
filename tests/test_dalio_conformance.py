@@ -227,11 +227,12 @@ class TestCommandValidator:
         ok, err = command_validator.validate_command(cmd_good, ws)
         assert ok, f"deploy_plugin.py must be permitted: {err}"
 
-    def test_cross_repo_pytest_allowed(self):
+    def test_cross_repo_pytest_rejected(self):
         ws = PLUGIN_ROOT
         cmd = "pytest /Users/thanghoang/github/ai-review-plugin/tests/test_peer_review.py"
         ok, err = command_validator.validate_command(cmd, ws)
-        assert ok, f"Cross-repo pytest should be permitted: {err}"
+        assert not ok, "Cross-repo pytest outside workspace must be rejected"
+        assert "resolves outside workspace" in str(err)
 
 class TestNoBarePassAST:
     def test_ast_no_error_suppression(self):

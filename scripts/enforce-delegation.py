@@ -5,7 +5,6 @@ from common import is_subagent, get_cache_dir, get_turn_state
 from ledger import Ledger
 from fsm import Event
 from command_validator import validate_command
-from review_gate import validate_review_gate
 
 def is_artifact_path(target_file, artifact_dir):
     if not target_file: return False
@@ -62,16 +61,6 @@ def main(argv=None, stdin=None, stdout=None):
                 return emit({"decision": "allow"})
 
         if tool_name in ["invoke_subagent", "default_api:invoke_subagent"]:
-            subagents = args.get("Subagents", [])
-            for sub in subagents:
-                role = str(sub.get("Role", "")).lower()
-                typename = str(sub.get("TypeName", "")).lower()
-                is_exempt = any(exempt_keyword in role or exempt_keyword in typename for exempt_keyword in ("review", "diagnostician", "diagnostic", "research", "probe"))
-                if not is_exempt:
-                    cwd = os.getcwd()
-                    ok, gate_err = validate_review_gate(cwd)
-                    if not ok:
-                        return emit_deny(gate_err)
             return emit({"decision": "allow"})
 
         if tool_name in ["manage_subagents", "default_api:manage_subagents"]:

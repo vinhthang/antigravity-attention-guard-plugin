@@ -153,51 +153,9 @@ class TestCoordinatorDelegation:
         assert result.get("decision") == "allow"
 
 
-class TestReviewGateIntegration:
-    def test_invoke_subagent_execution_denied_when_review_json_missing(self, tmp_path, monkeypatch):
+class TestSubagentInvocationAllowed:
+    def test_invoke_subagent_allowed_unconditionally(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        payload = {
-            "modelName": "claude-opus-4.6",
-            "toolCall": {
-                "name": "invoke_subagent",
-                "args": {
-                    "Subagents": [{"Role": "Task Executor", "TypeName": "flash", "Prompt": "Run build"}]
-                }
-            }
-        }
-        res = run_hook(payload)
-        assert res["decision"] == "deny"
-        assert "Plan Review Gate: review.json missing" in res["reason"]
-
-    def test_invoke_subagent_execution_denied_when_review_json_has_p0_p1(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        rev = tmp_path / "review.json"
-        rev.write_text(json.dumps({
-            "engine": "workbuddy",
-            "session_id": "workbuddy:sess_123456",
-            "issues": [{"severity": "P0", "description": "Blocker"}]
-        }))
-        payload = {
-            "modelName": "claude-opus-4.6",
-            "toolCall": {
-                "name": "invoke_subagent",
-                "args": {
-                    "Subagents": [{"Role": "Task Executor", "TypeName": "flash", "Prompt": "Run build"}]
-                }
-            }
-        }
-        res = run_hook(payload)
-        assert res["decision"] == "deny"
-        assert "blocking issues (P0/P1)" in res["reason"]
-
-    def test_invoke_subagent_execution_allowed_when_review_json_clean(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        rev = tmp_path / "review.json"
-        rev.write_text(json.dumps({
-            "engine": "workbuddy",
-            "session_id": "workbuddy:sess_123456",
-            "issues": []
-        }))
         payload = {
             "modelName": "claude-opus-4.6",
             "toolCall": {
@@ -210,19 +168,20 @@ class TestReviewGateIntegration:
         res = run_hook(payload)
         assert res["decision"] == "allow"
 
-    def test_invoke_subagent_review_exempt_allowed_without_review_json(self, tmp_path, monkeypatch):
+    def test_invoke_subagent_allowed_for_any_role(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        payload = {
-            "modelName": "claude-opus-4.6",
-            "toolCall": {
-                "name": "invoke_subagent",
-                "args": {
-                    "Subagents": [{"Role": "reviewer", "TypeName": "flash", "Prompt": "Review plan"}]
+        for role in ["Implementer", "Unit Tester", "Refactor Specialist", "Architect"]:
+            payload = {
+                "modelName": "claude-opus-4.6",
+                "toolCall": {
+                    "name": "invoke_subagent",
+                    "args": {
+                        "Subagents": [{"Role": role, "TypeName": "flash", "Prompt": "Do work"}]
+                    }
                 }
             }
-        }
-        res = run_hook(payload)
-        assert res["decision"] == "allow"
+            res = run_hook(payload)
+            assert res["decision"] == "allow"
 
     def test_manage_subagents_unconditional_allowed(self):
         payload = {
