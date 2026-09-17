@@ -154,23 +154,8 @@ class TestCoordinatorDelegation:
 
 
 class TestSubagentInvocationAllowed:
-    def test_invoke_subagent_allowed_unconditionally(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        payload = {
-            "modelName": "claude-opus-4.6",
-            "toolCall": {
-                "name": "invoke_subagent",
-                "args": {
-                    "Subagents": [{"Role": "Task Executor", "TypeName": "flash", "Prompt": "Run build"}]
-                }
-            }
-        }
-        res = run_hook(payload)
-        assert res["decision"] == "allow"
-
-    def test_invoke_subagent_allowed_for_any_role(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        for role in ["Implementer", "Unit Tester", "Refactor Specialist", "Architect"]:
+    def test_invoke_subagent_allowed_for_any_role(self):
+        for role in ["Task Executor", "Implementer", "Unit Tester", "Architect"]:
             payload = {
                 "modelName": "claude-opus-4.6",
                 "toolCall": {

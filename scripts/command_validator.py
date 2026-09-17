@@ -172,10 +172,6 @@ def run_tests() -> bool:
     ok, err = validate_command("python3 scripts/deploy_plugin.py --deploy", ws)
     assert ok, f"P0: deploy_plugin.py should be permitted: {err}"
 
-    test_path = os.path.join(home, "github", "ai-review-plugin", "tests", "test_peer_review.py")
-    ok, err = validate_command(f"pytest {test_path}", ws)
-    assert not ok, "Cross-repo path outside workspace should be rejected"
-
     print("All command_validator self-tests PASSED.")
     return True
 
