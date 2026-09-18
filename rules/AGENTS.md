@@ -21,13 +21,13 @@ Enforces subagent delegation and lifecycle governance to protect the Primary Age
 
 <instructions>
 ### 1. Subagent Model Selection Framework
-- **`pro` (High Reasoning)**: Used for in-depth Root Cause Diagnosis, complex refactoring, tricky algorithmic implementation, architectural investigations, and workstream Coordination. When executing code mutations, `pro` must follow the sequential write discipline defined in `COORDINATOR.md`.
-- **`flash` (Mechanical Execution)**: Used for deterministic execution where planning is already completed (applying targeted diffs, running tests, formatting).
+- **`flash` (Primary Workhorse / Default)**: The first-line choice for both deterministic task execution and rapid root-cause diagnosis. Highly optimized for tool use, low latency, precise schema adherence, and fast feedback loops.
+- **`pro` (High Reasoning Fallback)**: Reserved for deep architectural investigations, intricate algorithmic roadblocks, or tricky mathematical reasoning when `flash` hits a wall. When executing code mutations, `pro` must follow the sequential write discipline defined in `COORDINATOR.md`.
 - **`flash_lite` (Read-Only Research)**: Reserved for non-mutating searches, grep lookups, and reading documentation.
 
 ### 2. Escalation Protocol & State Machine
 1. On executor failure, increment `escalation_counter` (keyed by unique `execution_attempt_id`).
-2. Dispatch a `pro` Diagnostician (Tier 1: Read-Only Pro Diagnostician for diagnosis, or Pro Specialist for complex reproduction/refactoring) on failure attempt 1 (`escalation_counter == 1`) to isolate root causes (`schemas/diagnostician-payload.json`).
+2. Dispatch a Diagnostician (Tier 1: Read-Only Pro Diagnostician or fast Flash Diagnostician) on failure attempt 1 (`escalation_counter == 1`) to isolate root causes (`schemas/diagnostician-payload.json`). Default to `flash` for rapid, grounded tool execution; escalate to `pro` only when deep algorithmic reasoning is required.
 3. If diagnosis is determined and `escalation_counter < 3`, amend the implementation plan and seek explicit human approval ("Proceed") before any re-execution attempt.
 4. If diagnosis is ambiguous or execution fails a second time (`escalation_counter >= 2`), dispatch external second-opinion review (Tier 2: WorkBuddy External Second-Opinion) with diagnostic context.
 5. If execution fails a third time (`escalation_counter >= 3`) or diagnosis remains inconclusive, stop autonomous looping and escalate directly to the human user.
