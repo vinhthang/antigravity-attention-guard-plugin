@@ -4,7 +4,7 @@
 
 **Antigravity Attention Guard** prevents **Attention Dilution**—a failure mode where a primary coding agent floods its context window with compiler errors, noisy command traces, and speculative file edits, losing high-level architectural awareness.
 
-The plugin enforces **Ray Dalio's 5-Step Process** (Clear Goals, Problem Intolerance, Root Cause Diagnosis, Deterministic Design, Execution Accountability) across the agent lifecycle through native hooks, an SQLite state machine, and a command security firewall.
+The plugin enforces subagent delegation, attention protection, and execution sandboxing across the agent lifecycle through native hooks, an SQLite state machine, and a command security firewall.
 
 ---
 
@@ -21,18 +21,18 @@ The plugin enforces **Ray Dalio's 5-Step Process** (Clear Goals, Problem Intoler
                         Antigravity Token  │ (scripts/inject-rules.py)
                                            ▼
                        ┌─────────────────────────────────────────┐
-                       │          Executor Subagents             │
-                       │  - Mechanical code edits (flash)        │
-                       │  - Local workspace confinement          │
+                       │      Primary Workhorse Subagents        │
+                       │  - Model: flash (fast, grounded, tool)  │
+                       │  - Execution, TDD diffs, rapid triage   │
                        │  - Command security firewall            │
                        └───────────────────┬─────────────────────┘
                                            │
-                        Fails assertion?   │ Strict JSON Contract
-                                           ▼ (schemas/executor-payload.json)
+                        Complex roadblock? │ Strict JSON Contract
+                        or failure triage  ▼ (schemas/*-payload.json)
                        ┌─────────────────────────────────────────┐
-                       │      Tier 1: Read-Only Diagnostician    │
-                       │  - Model: pro (high reasoning)          │
-                       │  - Root cause vs proximate cause        │
+                       │       Tier 1: Root Cause Diagnosis      │
+                       │  - flash default (fast schema triage)   │
+                       │  - pro fallback (high reasoning)        │
                        └─────────────────────────────────────────┘
 ```
 
@@ -67,11 +67,11 @@ Every terminal command run by subagents is filtered through [`command_validator.
   - Acts as an invariant refresher, reminding the Primary Agent to delegate execution.
 
 ### 5. Multi-Tier Escalation Protocol
-Aligned with Ray Dalio's principles in [`rules/AGENTS.md`](rules/AGENTS.md):
-- **Mechanical Execution (`flash`)**: Fast, deterministic execution of approved implementation plans.
-- **Tier 1 Diagnostician (`pro`)**: On test or command failure, dispatches a **strictly read-only** `pro` subagent to isolate root cause from proximate cause. Speculative trial-and-error edits are forbidden.
-- **Tier 2 External Second-Opinion**: If diagnosis is ambiguous or fails twice, requests secondary review before amending the plan.
-- **Dalio Human Gate**: After 3 escalations, autonomous looping terminates and escalates directly to the user.
+Aligned with [`rules/AGENTS.md`](rules/AGENTS.md):
+- **Primary Workhorse (`flash`)**: Fast, deterministic execution of approved implementation plans and rapid first-line root-cause diagnosis.
+- **High-Reasoning Fallback (`pro`)**: Unshackled for deep architectural investigations, intricate algorithmic roadblocks, or multi-file refactoring when `flash` hits a wall (following sequential write discipline in `COORDINATOR.md`).
+- **Tier 2 External Second-Opinion**: If diagnosis is ambiguous or fails twice (`escalation_counter >= 2`), requests secondary review (WorkBuddy AI) before amending the plan.
+- **Human Gate**: After 3 escalations (`escalation_counter >= 3`), autonomous looping terminates and escalates directly to the user.
 
 ### 6. Telemetry & Metrics
 - Local metrics dashboard accessible via CLI:
