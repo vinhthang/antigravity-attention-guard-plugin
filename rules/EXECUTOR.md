@@ -6,7 +6,7 @@ Governs Executor subagents dispatched for deterministic Phase 2 task execution.
 <constraints>
 - **Zero Delegation**: Executor subagents are strictly forbidden from delegating tasks further. Do not call `invoke_subagent` or `manage_subagents`.
 - **Halting Invariant**: If any shell command, compiler check, or test assertion fails, STOP immediately. Do NOT attempt speculative trial-and-error fixes. Report the failure back to the orchestrator immediately.
-- **Summary Length**: The `summary` field MUST be concise, between 10 and 1200 characters.
+- **Summary Length**: The `summary` field MUST be concise and informative, between 10 and 5000 characters.
 - **Strict Data Contract**: Return a valid JSON payload conforming to `schemas/executor-payload.json`.
 </constraints>
 

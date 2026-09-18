@@ -42,8 +42,8 @@ def validate_payload_builtin(role: str, payload: Dict[str, Any]) -> Tuple[bool, 
         return False, f"Invalid status: '{status}'. Expected 'completed' or 'failed'"
     
     summary = payload["summary"]
-    if not isinstance(summary, str) or len(summary) < 10 or len(summary) > 1200:
-        return False, f"Invalid summary: must be string between 10 and 1200 characters"
+    if not isinstance(summary, str) or len(summary) < 10 or len(summary) > 5000:
+        return False, f"Invalid summary: must be string between 10 and 5000 characters"
     
     if role == "diagnostician":
         if status == "completed":
@@ -222,6 +222,27 @@ def run_tests() -> bool:
     }
     ok, err = validate_payload("coordinator", coord_invalid)
     assert not ok, "Coordinator completed with failed child should be invalid"
+
+    # Summary length boundary tests
+    long_summary_valid = {
+        "execution_attempt_id": test_uuid,
+        "status": "completed",
+        "summary": "A" * 2000,
+        "files_modified": ["src/app.py"],
+        "test_results": {"passed": 1, "failed": 0, "total": 1, "command_executed": "pytest"}
+    }
+    ok, err = validate_payload("executor", long_summary_valid)
+    assert ok, f"2000-char summary should be accepted, got error: {err}"
+
+    overlong_summary_invalid = {
+        "execution_attempt_id": test_uuid,
+        "status": "completed",
+        "summary": "A" * 5001,
+        "files_modified": ["src/app.py"],
+        "test_results": {"passed": 1, "failed": 0, "total": 1, "command_executed": "pytest"}
+    }
+    ok, err = validate_payload("executor", overlong_summary_invalid)
+    assert not ok, "5001-char summary should be rejected"
 
     print("All payload_validator self-tests PASSED.")
     return True
