@@ -60,7 +60,7 @@ def test_turn_zero_completion(setup_env):
     _run_hook(attention_check_mod, payload)
     
     with l._get_connection() as conn:
-        assert conn.execute("SELECT status FROM work_items WHERE work_id=?", (token,)).fetchone()[0] == 'TERMINATED'
+        assert conn.execute("SELECT status FROM work_items WHERE work_id=?", (token,)).fetchone()[0] in ('COMPLETED', 'TERMINATED')
 
 def test_timeout_handling(setup_env):
     l = Ledger()

@@ -37,7 +37,8 @@ Enforces subagent delegation and lifecycle governance to protect the Primary Age
 - When a subagent message arrives, immediately kill the active timer task.
 - If the timer fires and the subagent hasn't reported, query `manage_subagents(Action="list")` and terminate hung processes.
 
-### 4. Subagent Termination Cleanup
-- If the Primary Agent kills a child subagent, it must handle dependent subagents cleanly and avoid orphaned processes.
+### 4. Subagent Termination Cleanup & Lifecycle Reuse
+- **Lifecycle Decoupling**: Task completion is decoupled from process lifecycle. When a subagent completes its work and returns a completed payload, it may remain idle in memory for follow-up reuse without blocking turns.
+- **Process Cleanup**: If the Primary Agent explicitly terminates a child subagent (e.g. on timeout or hung process), it must handle dependent subagents cleanly and avoid orphaned processes.
 </instructions>
 </rule>

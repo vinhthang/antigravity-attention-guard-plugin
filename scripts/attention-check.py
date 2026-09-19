@@ -58,7 +58,7 @@ def main(argv=None, stdin=None, stdout=None):
     try:
         with ledger._get_connection() as conn:
             cutoff = time.time() - 86400
-            conn.execute("UPDATE work_items SET status = 'TIMED_OUT' WHERE status NOT IN ('TERMINATED', 'FAILED', 'TIMED_OUT') AND COALESCE(updated_at, created_at) < ?", (cutoff,))
+            conn.execute("UPDATE work_items SET status = 'TIMED_OUT' WHERE status NOT IN ('COMPLETED', 'TERMINATED', 'DONE', 'FAILED', 'TIMED_OUT') AND COALESCE(updated_at, created_at) < ?", (cutoff,))
     except Exception as exc:
         sys.stderr.write(f"Warning: {exc}\n")
 
@@ -83,13 +83,14 @@ def main(argv=None, stdin=None, stdout=None):
 
             if event_type and parent_conv_id and parent_turn_id is not None:
                 if event_type in (Event.WORK_TERMINATED_OK.name, Event.WORK_TERMINATED_ERROR.name, Event.WORK_TIMED_OUT.name):
+                    target_status = 'COMPLETED' if event_type == Event.WORK_TERMINATED_OK.name else ('FAILED' if event_type == Event.WORK_TERMINATED_ERROR.name else 'TIMED_OUT')
                     with ledger._get_connection() as conn:
-                        cursor = conn.execute("UPDATE work_items SET status = 'TERMINATED' WHERE status = 'ACTIVE' AND work_id = (SELECT token_id FROM tokens WHERE claimed_by = ?)", (conv_id,))
+                        cursor = conn.execute("UPDATE work_items SET status = ? WHERE status = 'ACTIVE' AND work_id = (SELECT token_id FROM tokens WHERE claimed_by = ?)", (target_status, conv_id))
                         if cursor.rowcount == 0:
                             return emit({"decision": "allow"})
                 
                 with ledger._get_connection() as conn:
-                    cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status NOT IN ('TERMINATED', 'FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (parent_conv_id, str(parent_turn_id)))
+                    cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status NOT IN ('COMPLETED', 'TERMINATED', 'DONE', 'FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (parent_conv_id, str(parent_turn_id)))
                     all_work_terminal = (cursor.fetchone()[0] == 0)
 
                 ledger.insert_event(parent_conv_id, str(parent_turn_id), "Stop", "0", conv_id, event_type, json.dumps({"child_id": conv_id, "all_work_terminal": all_work_terminal}))
@@ -110,7 +111,7 @@ def main(argv=None, stdin=None, stdout=None):
 
         if current_state == State.EXECUTION_ACTIVE:
             with ledger._get_connection() as conn:
-                cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status NOT IN ('TERMINATED', 'FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
+                cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status NOT IN ('COMPLETED', 'TERMINATED', 'DONE', 'FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
                 active_count = cursor.fetchone()[0]
                 cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
                 total_count = cursor.fetchone()[0]
@@ -137,9 +138,11 @@ def main(argv=None, stdin=None, stdout=None):
                 else:
                     ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.WORK_TIMED_OUT.name, json.dumps({"reason": "Orphaned work timed out"}))
                     current_state = State.RECOVERY_REQUIRED
-            elif active_count > 0 and payload.get("fullyIdle", True):
-                ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.WORK_TERMINATED_ERROR.name, json.dumps({"reason": "Primary idled while active"}))
-                current_state = State.RECOVERY_REQUIRED
+            elif active_count > 0:
+                # Primary agent has active subagent work running in background.
+                # Allow turn to finish so Primary agent can wait for asynchronous subagent response.
+                reset_rejection_count(tracker)
+                return emit({"decision": "allow"})
             else:
                 reset_rejection_count(tracker)
                 return emit({"decision": "allow"})

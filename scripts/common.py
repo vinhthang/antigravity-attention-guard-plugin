@@ -54,12 +54,11 @@ def is_subagent(data):
                             tok = match.group(1)
                             if tok not in tokens:
                                 tokens.append(tok)
-                        break
                 except Exception:
-                    break
+                    continue
 
         ledger = Ledger()
-        for token in tokens:
+        for token in reversed(tokens):
             with ledger._get_connection() as conn:
                 cursor = conn.execute("SELECT payload FROM events WHERE type = 'WORK_PREPARED' AND payload LIKE ?", (f'%"{token}"%',))
                 row = cursor.fetchone()

@@ -378,6 +378,37 @@ class TestIdentityAndCommandRemediation:
         assert result["decision"] == "deny", f"Expected deny for shell operator, got: {result}"
         assert "Attention Guard Command Policy Violation" in result.get("reason", "")
 
+        # Subagent running allowed python -m module
+        good_payload_python_m = {
+            "conversationId": child_conv_id,
+            "transcriptPath": str(transcript),
+            "toolCall": {
+                "name": "run_command",
+                "args": {
+                    "CommandLine": "python3 -m pytest tests/",
+                    "Cwd": PLUGIN_ROOT
+                }
+            }
+        }
+        result = run_hook(good_payload_python_m)
+        assert result["decision"] == "allow", f"Expected allow for python3 -m pytest, got: {result}"
+
+        # Subagent running forbidden python -m module
+        bad_payload_python_m = {
+            "conversationId": child_conv_id,
+            "transcriptPath": str(transcript),
+            "toolCall": {
+                "name": "run_command",
+                "args": {
+                    "CommandLine": "python3 -m http.server",
+                    "Cwd": PLUGIN_ROOT
+                }
+            }
+        }
+        result = run_hook(bad_payload_python_m)
+        assert result["decision"] == "deny", f"Expected deny for forbidden module, got: {result}"
+
+
 
 def test_two_tiered_escalation():
     agents_rule_path = os.path.join(PLUGIN_ROOT, "rules", "AGENTS.md")

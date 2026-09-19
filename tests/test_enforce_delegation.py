@@ -98,6 +98,34 @@ class TestSubagentDetection:
         data = {"transcriptPath": str(transcript), "modelName": "claude-opus-4.6", "conversationId": "child1"}
         assert is_subagent(data) == (True, False, 0, "parent", "1")
 
+    def test_reused_subagent_multiple_turns(self, tmp_path):
+        import importlib
+        import ledger
+        import common
+        importlib.reload(ledger)
+        importlib.reload(common)
+        l = ledger.Ledger()
+
+        token1 = "1111-aaaa"
+        token2 = "2222-bbbb"
+        with l._get_connection() as conn:
+            conn.execute("INSERT INTO tokens (token_id) VALUES (?)", (token1,))
+            conn.execute("INSERT INTO tokens (token_id) VALUES (?)", (token2,))
+        payload1 = {"token": token1, "may_delegate": False, "remaining_depth": 0, "parent_conv_id": "parent", "parent_turn_id": "1"}
+        payload2 = {"token": token2, "may_delegate": True, "remaining_depth": 1, "parent_conv_id": "parent", "parent_turn_id": "2"}
+        l.insert_event("parent", "1", "PreToolUse", "0", token1, "WORK_PREPARED", json.dumps(payload1))
+        l.insert_event("parent", "2", "PreToolUse", "0", token2, "WORK_PREPARED", json.dumps(payload2))
+
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "First task [ANTIGRAVITY_TOKEN:1111-aaaa]"}\n'
+            '{"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "Done task 1"}\n'
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Follow-up reused task [ANTIGRAVITY_TOKEN:2222-bbbb]"}\n'
+        )
+        data = {"transcriptPath": str(transcript), "modelName": "claude-opus-4.6", "conversationId": "reused_child"}
+        # Should detect the most recent token (2222-bbbb) and return its metadata
+        assert common.is_subagent(data) == (True, True, 1, "parent", "2")
+
     def test_subagent_with_invalid_token_blocked(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(

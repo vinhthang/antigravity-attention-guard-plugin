@@ -29,6 +29,8 @@ FORBIDDEN_BINARIES = {
 ALLOWED_GIT_SUBCOMMANDS = {"status", "diff", "log", "add", "commit", "fetch", "push"}
 FORBIDDEN_GIT_FLAGS = {"-C", "--git-dir", "--work-tree", "--exec-path"}
 
+ALLOWED_PYTHON_MODULES = {"pytest", "unittest", "pip", "venv", "coverage", "ruff", "mypy"}
+
 DEPLOYMENT_BASE_DIR = os.path.realpath(os.path.expanduser("~/.gemini/config/plugins"))
 
 def get_project_allowed_binaries(workspace_root: str) -> Set[str]:
@@ -129,9 +131,25 @@ def validate_command(command_str: str, workspace_root: Optional[str] = None) -> 
     # 6. Python script policy
     is_deploy_script = False
     if binary_name in ("python3", "python"):
-        for arg in tokens[1:]:
-            if arg in ("-c", "-m") or arg.startswith("-c") or arg.startswith("-m"):
+        i = 1
+        while i < len(tokens):
+            arg = tokens[i]
+            if arg in ("-c",) or arg.startswith("-c"):
                 return False, f"Python inline code execution flag '{arg}' is forbidden; execute scripts by file path"
+            if arg == "-m":
+                if i + 1 >= len(tokens):
+                    return False, "Python -m invocation missing module name"
+                mod = tokens[i + 1]
+                if mod not in ALLOWED_PYTHON_MODULES:
+                    return False, f"Python module '{mod}' is forbidden; allowed: {sorted(list(ALLOWED_PYTHON_MODULES))}"
+                i += 2
+                continue
+            if arg.startswith("-m"):
+                mod = arg[2:]
+                if not mod or mod not in ALLOWED_PYTHON_MODULES:
+                    return False, f"Python module '{mod}' is forbidden; allowed: {sorted(list(ALLOWED_PYTHON_MODULES))}"
+                i += 1
+                continue
             if not arg.startswith("-"):
                 if arg.endswith(".py"):
                     expanded_s = os.path.expanduser(arg)
@@ -140,6 +158,7 @@ def validate_command(command_str: str, workspace_root: Optional[str] = None) -> 
                     if real_script == deploy_target or os.path.basename(real_script) == "deploy_plugin.py":
                         is_deploy_script = True
                 break
+            i += 1
 
     # 7. Path confinement & P0 Deployment Directory Security
     for arg in tokens[1:]:
@@ -189,6 +208,15 @@ def run_tests() -> bool:
 
     ok, err = validate_command('python3 -c "import os"', ws)
     assert not ok, "python3 -c should be rejected"
+
+    ok, err = validate_command("python3 -m pytest tests/", ws)
+    assert ok, f"python3 -m pytest should be allowed: {err}"
+
+    ok, err = validate_command("python3 -m unittest", ws)
+    assert ok, f"python3 -m unittest should be allowed: {err}"
+
+    ok, err = validate_command("python3 -m http.server", ws)
+    assert not ok, "python3 -m with untrusted module should be rejected"
 
     ok, err = validate_command("curl http://example.com", ws)
     assert not ok, "curl should be rejected"
