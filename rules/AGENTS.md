@@ -10,13 +10,13 @@ Enforces subagent delegation and lifecycle governance to protect the Primary Age
   - Multi-step implementation plans require explicit human approval ("Proceed") before execution subagents are dispatched.
 - **Problem Intolerance & Root Cause Focus**:
   - Zero error suppression: Never ignore failures, swallow exceptions with bare `pass`, or mask errors with `|| true`. Any command failure or assertion break is a structural blocker.
-  - When an execution subagent fails, avoid speculative trial-and-error edits in the main thread (the primary cause of attention dilution). Dispatch a `pro` Diagnostician to isolate root causes before attempting fixes.
+  - When an execution subagent fails, avoid speculative trial-and-error edits in the main thread (the primary cause of attention dilution). Dispatch a Diagnostician (Tier 1: Read-Only Pro Diagnostician or fast Flash Diagnostician) to isolate root causes before attempting fixes.
 - **Execution Accountability & Data Contracts**:
   - Subagents must return structured JSON conforming to role schemas in `schemas/`.
   - Every payload must include an immutable `execution_attempt_id` (UUID format) and a concise summary.
   - Validate returned subagent payloads using:
     `rtk python3 scripts/payload_validator.py --role <executor|diagnostician|coordinator> --payload '<json>'`
-  - Validation failures trigger `failure_kind: PAYLOAD_SCHEMA_VIOLATION` and route to Root Cause Diagnosis.
+- Validation failures trigger `failure_kind: PAYLOAD_SCHEMA_VIOLATION` and route to Root Cause Diagnosis.
 </constraints>
 
 <instructions>
