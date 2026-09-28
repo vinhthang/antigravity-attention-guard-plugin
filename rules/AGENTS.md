@@ -32,10 +32,18 @@ Enforces subagent delegation and lifecycle governance to protect the Primary Age
 4. If diagnosis is ambiguous or execution fails a second time (`escalation_counter >= 2`), dispatch external second-opinion review (Tier 2: WorkBuddy External Second-Opinion) with diagnostic context.
 5. If execution fails a third time (`escalation_counter >= 3`) or diagnosis remains inconclusive, stop autonomous looping and escalate directly to the human user.
 
-### 3. Subagent Liveness Tracking
-- When spawning subagents, the Primary Agent MUST ALWAYS arm a 300s liveness timer via `schedule(DurationSeconds=300, TimerCondition="any")`.
-- When a subagent message arrives, immediately kill the active timer task.
-- If the timer fires and the subagent hasn't reported, query `manage_subagents(Action="list")` and terminate hung processes.
+### 3. Subagent Liveness Tracking & Asynchronous Watchdogs
+- **Mandatory 300s Watchdog**: When spawning subagents via `invoke_subagent` OR launching finite asynchronous background commands via `run_command` (where `IsDaemon` is false), the Primary Agent MUST ALWAYS arm a 300s watchdog timer via `schedule(DurationSeconds=300, TimerCondition="any")`.
+- **Early Cancellation & Re-arming Invariant**:
+  - When an async message arrives (subagent payload or background task completion), immediately kill the active timer task if still running.
+  - If additional subagents or background tasks remain active (`manage_subagents(Action="list")` or `manage_task(Action="list")`), immediately re-arm the watchdog timer for the remaining in-flight operations before yielding the turn.
+- **Daemon Process & Long-Running Scaling**:
+  - Standing background daemons (`IsDaemon=true`, e.g. dev servers, tunnels, file watchers) are exempt from watchdog termination.
+  - For operations known in advance to legitimately exceed 300s (e.g. massive compiler builds or multi-gigabyte transfers), scale DurationSeconds proportionally to the expected upper bound rather than using the default 300s.
+- **Timeout Triage & Non-Destructive Killing**:
+  - If the 300s watchdog fires and a subagent has not reported: query `manage_subagents(Action="list")`, inspect `stateDetail`, and terminate hung processes via `manage_subagents(Action="kill")`.
+  - If the watchdog fires and a background command has not exited: inspect task status via `manage_task(Action="status")`, examine log tails, and terminate hung tasks via `manage_task(Action="kill")`.
+- **Post-Timeout Escalation**: A watchdog termination is a structural failure (`failure_kind: TIMEOUT_OR_HUNG_PROCESS`). Never swallow timeouts or re-run the exact command blindly. Increment `escalation_counter` and route to Root Cause Diagnosis to isolate why the process blocked (e.g. unbuffered pipe, stdin prompt, deadlock).
 
 ### 4. Subagent Termination Cleanup & Lifecycle Reuse
 - **Lifecycle Decoupling**: Task completion is decoupled from process lifecycle. When a subagent completes its work and returns a completed payload, it may remain idle in memory for follow-up reuse without blocking turns.

@@ -20,6 +20,7 @@ spec.loader.exec_module(enforce_mod)
 
 
 is_artifact_path = enforce_mod.is_artifact_path
+is_test_command = enforce_mod.is_test_command
 
 @pytest.fixture(autouse=True)
 def setup_test_cache(tmp_path, monkeypatch):
@@ -144,6 +145,32 @@ class TestArtifactPath:
     def test_non_artifact_blocked(self):
         assert is_artifact_path("/Users/code/project/main.py", "/home/user/.gemini/brain/abc") is False
 
+    def test_walkthrough_outside_artifact_dir_blocked(self, tmp_path):
+        assert is_artifact_path("/repo/walkthrough.md", str(tmp_path / "artifacts")) is False
+        assert is_artifact_path("/repo/walkthrough.md", None) is False
+
+    def test_walkthrough_inside_brain_allowed(self, tmp_path):
+        brain_walkthrough = tmp_path / "brain" / "conv-123" / "walkthrough.md"
+        assert is_artifact_path(str(brain_walkthrough), None) is True
+
+
+class TestIsTestCommand:
+    def test_search_and_read_commands_not_test_commands(self):
+        assert is_test_command("grep pytest .") is False
+        assert is_test_command("rg pytest") is False
+        assert is_test_command("grep -rn pytest .") is False
+        assert is_test_command("which pytest") is False
+        assert is_test_command("cat tests/test_pytest.py") is False
+
+    def test_direct_and_python_test_runners(self):
+        assert is_test_command("pytest") is True
+        assert is_test_command("pytest tests/") is True
+        assert is_test_command("rtk pytest tests/") is True
+        assert is_test_command("python3 -m pytest tests/") is True
+        assert is_test_command("python -m unittest discover") is True
+        assert is_test_command("cargo test") is True
+        assert is_test_command("npm test") is True
+
 
 
 class TestGenerateImageAllowed:
@@ -225,3 +252,348 @@ class TestSubagentInvocationAllowed:
         }
         res = run_hook(payload)
         assert res["decision"] == "allow"
+
+
+class TestPrimaryAgentPlanDelegationEnforcement:
+    def test_is_plan_execution_active_helper(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        # Non-existent transcript
+        assert enforce_mod.is_plan_execution_active(str(tmp_path / "non_existent.jsonl"), str(tmp_path)) is False
+
+        # No approval
+        transcript.write_text('{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Just do a quick fix"}\n')
+        assert enforce_mod.is_plan_execution_active(str(transcript), str(tmp_path)) is False
+
+        # Approved via "The user has approved this document"
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+        )
+        assert enforce_mod.is_plan_execution_active(str(transcript), str(tmp_path)) is True
+
+        # Approved via "Proceed on implementation_plan.md"
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Proceed on implementation_plan.md"}\n'
+        )
+        assert enforce_mod.is_plan_execution_active(str(transcript), str(tmp_path)) is True
+
+        # Approved but subsequent walkthrough.md present
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+            '{"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "Generated walkthrough.md successfully"}\n'
+        )
+        assert enforce_mod.is_plan_execution_active(str(transcript), str(tmp_path)) is False
+
+    def test_write_to_file_repo_denied_during_active_plan(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+        )
+        payload = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": "/repo/src/core.py",
+                    "CodeContent": "def active(): pass"
+                }
+            }
+        }
+        res = run_hook(payload)
+        assert res["decision"] == "deny"
+        assert "Primary Agent is forbidden" in res.get("reason", "") or "Attention Dilution Guard" in res.get("reason", "")
+
+        # Also verify with "Proceed on implementation_plan.md"
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Proceed on implementation_plan.md"}\n'
+        )
+        res = run_hook(payload)
+        assert res["decision"] == "deny"
+
+    def test_replace_file_content_repo_denied_during_active_plan(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+        )
+        payload = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {
+                    "TargetFile": "/repo/src/core.py",
+                    "TargetContent": "old",
+                    "ReplacementContent": "new"
+                }
+            }
+        }
+        res = run_hook(payload)
+        assert res["decision"] == "deny"
+
+    def test_write_to_file_artifact_allowed_during_active_plan(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+        )
+        # Walkthrough inside artifact_dir
+        payload_wt = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": str(artifact_dir / "walkthrough.md"),
+                    "CodeContent": "# Walkthrough"
+                }
+            }
+        }
+        assert run_hook(payload_wt)["decision"] == "allow"
+
+        # Other artifact file inside artifact_dir
+        payload_other_art = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": str(artifact_dir / "experiment.md"),
+                    "CodeContent": "# Experiment"
+                }
+            }
+        }
+        assert run_hook(payload_other_art)["decision"] == "allow"
+
+    def test_invoke_subagent_allowed_during_active_plan(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+        )
+        payload = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Subagents": [{"Role": "Task Executor", "TypeName": "flash", "Prompt": "Implement feature"}]
+                }
+            }
+        }
+        assert run_hook(payload)["decision"] == "allow"
+
+    def test_run_command_test_suites_denied_during_active_plan(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+        )
+        test_commands = [
+            "rtk pytest tests/",
+            "pytest tests/test_enforce_delegation.py",
+            "python3 -m pytest tests/",
+            "cargo test",
+            "npm test"
+        ]
+        for cmd in test_commands:
+            payload = {
+                "transcriptPath": str(transcript),
+                "artifactDirectoryPath": str(artifact_dir),
+                "modelName": "claude-opus-4.6",
+                "toolCall": {
+                    "name": "run_command",
+                    "args": {"CommandLine": cmd}
+                }
+            }
+            res = run_hook(payload)
+            assert res["decision"] == "deny", f"Expected test command '{cmd}' to be denied during active plan, got {res}"
+            assert "Primary Agent is forbidden" in res.get("reason", "") or "Attention Dilution Guard" in res.get("reason", "")
+
+    def test_run_command_read_only_allowed_during_active_plan(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+        )
+        allowed_cmds = [
+            "git status",
+            "git diff",
+            "ls -la",
+            "cat README.md"
+        ]
+        for cmd in allowed_cmds:
+            payload = {
+                "transcriptPath": str(transcript),
+                "artifactDirectoryPath": str(artifact_dir),
+                "modelName": "claude-opus-4.6",
+                "toolCall": {
+                    "name": "run_command",
+                    "args": {"CommandLine": cmd}
+                }
+            }
+            res = run_hook(payload)
+            assert res["decision"] == "allow", f"Expected read-only command '{cmd}' to be allowed, got {res}"
+
+    def test_direct_edits_allowed_when_no_plan_approved(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        # Transcript with no plan approval
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Please fix a minor typo in README.md"}\n'
+        )
+        # write_to_file on repo file allowed
+        payload_write = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {"TargetFile": "/repo/README.md", "CodeContent": "# New"}
+            }
+        }
+        assert run_hook(payload_write)["decision"] == "allow"
+
+        # replace_file_content on repo file allowed
+        payload_replace = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {"TargetFile": "/repo/README.md", "TargetContent": "a", "ReplacementContent": "b"}
+            }
+        }
+        assert run_hook(payload_replace)["decision"] == "allow"
+
+        # test command allowed for quick one-off
+        payload_test = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "run_command",
+                "args": {"CommandLine": "rtk pytest tests/"}
+            }
+        }
+        assert run_hook(payload_test)["decision"] == "allow"
+
+    def test_direct_edits_allowed_after_walkthrough_generated(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+            '{"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "Generated walkthrough.md"}\n'
+        )
+        payload = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {"TargetFile": "/repo/src/core.py", "CodeContent": "def done(): pass"}
+            }
+        }
+        assert run_hook(payload)["decision"] == "allow"
+
+    def test_tool_outputs_do_not_trigger_plan_approval(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+
+        # Tool output containing "The user has approved this document" must NOT activate plan mode
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Check log files"}\n'
+            '{"source": "TOOL_RESULT", "type": "TOOL_OUTPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+        )
+        assert enforce_mod.is_plan_execution_active(str(transcript), str(artifact_dir)) is False
+
+        # Tool output containing "proceed" must NOT activate plan mode
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Run analysis"}\n'
+            '{"source": "TOOL_RESULT", "type": "TOOL_OUTPUT", "content": "Output: proceed with implementation_plan.md"}\n'
+        )
+        assert enforce_mod.is_plan_execution_active(str(transcript), str(artifact_dir)) is False
+
+        # Model output containing approval text must also NOT activate plan mode
+        transcript.write_text(
+            '{"source": "MODEL", "type": "PLANNER_RESPONSE", "content": "The user has approved this document"}\n'
+        )
+        assert enforce_mod.is_plan_execution_active(str(transcript), str(artifact_dir)) is False
+
+    def test_search_pytest_allowed_during_active_plan(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+        )
+        for search_cmd in ["grep pytest .", "rg pytest", "grep -rn pytest .", "which pytest"]:
+            payload = {
+                "transcriptPath": str(transcript),
+                "artifactDirectoryPath": str(artifact_dir),
+                "modelName": "claude-opus-4.6",
+                "toolCall": {
+                    "name": "run_command",
+                    "args": {"CommandLine": search_cmd}
+                }
+            }
+            res = run_hook(payload)
+            assert res["decision"] == "allow", f"Search command '{search_cmd}' should be allowed during active plan"
+
+    def test_walkthrough_via_tool_call_deactivates_plan(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+            '{"source": "MODEL", "type": "PLANNER_RESPONSE", "tool_calls": [{"name": "write_to_file", "args": {"TargetFile": "/artifacts/walkthrough.md", "CodeContent": "# Done"}}]}\n'
+        )
+        assert enforce_mod.is_plan_execution_active(str(transcript), str(artifact_dir)) is False
+
+    def test_tool_output_mentioning_walkthrough_does_not_deactivate_plan(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+            '{"source": "TOOL_RESULT", "type": "TOOL_OUTPUT", "content": "file listing: walkthrough.md"}\n'
+        )
+        assert enforce_mod.is_plan_execution_active(str(transcript), str(artifact_dir)) is True
+
+    def test_write_to_file_repo_walkthrough_denied_during_active_plan(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+        )
+        payload = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": "/repo/walkthrough.md",
+                    "CodeContent": "# Fake walkthrough in workspace repo"
+                }
+            }
+        }
+        res = run_hook(payload)
+        assert res["decision"] == "deny"
+

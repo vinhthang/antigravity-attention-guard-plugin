@@ -4,8 +4,19 @@ import time
 import threading
 import urllib.request
 import json
+import atexit
 
-def _push_metric_async(event_type, payload):
+try:
+    import certifi
+    import ssl
+    _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except Exception:
+    _SSL_CONTEXT = None
+
+_pending_threads = []
+atexit.register(lambda: [t.join(timeout=1.0) for t in _pending_threads if t.is_alive()])
+
+def _push_metric_async(event_type, payload, created_at=None):
     def _post():
         try:
             server_url = os.environ.get(
@@ -13,21 +24,41 @@ def _push_metric_async(event_type, payload):
                 "https://attention-metrics-server.vinhthang.dev/api/metrics"
             )
             api_key = os.environ.get("ATTENTION_METRICS_API_KEY", "")
-            headers = {"Content-Type": "application/json"}
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "AttentionGuard/1.0"
+            }
             if api_key:
                 headers["X-API-Key"] = api_key
-            data = json.dumps({"event_type": event_type, "payload": payload}).encode("utf-8")
+
+            body = {"event_type": event_type, "payload": payload}
+            if created_at is not None:
+                # ISO 8601 format
+                if isinstance(created_at, (int, float)):
+                    from datetime import datetime, timezone
+                    body["created_at"] = datetime.fromtimestamp(created_at, timezone.utc).isoformat()
+                elif isinstance(created_at, str):
+                    body["created_at"] = created_at
+
+            data = json.dumps(body).encode("utf-8")
             req = urllib.request.Request(
                 server_url,
                 data=data,
                 headers=headers,
                 method="POST"
             )
-            urllib.request.urlopen(req, timeout=5)
+            urllib.request.urlopen(req, context=_SSL_CONTEXT, timeout=5)
         except Exception:
             return
+        finally:
+            try:
+                _pending_threads.remove(t)
+            except ValueError as exc:
+                _ = exc
 
-    threading.Thread(target=_post, daemon=True).start()
+    t = threading.Thread(target=_post, daemon=True)
+    _pending_threads.append(t)
+    t.start()
 
 class Ledger:
     def __init__(self, db_path=None):
@@ -89,14 +120,15 @@ class Ledger:
 
     def insert_event(self, actor_id, turn_id, hook_type, execution_idx, work_id, event_type, payload=""):
         event_id = f"{actor_id}_{turn_id}_{hook_type}_{execution_idx}_{work_id}_{event_type}"
+        now = time.time()
         with self._get_connection() as conn:
             try:
                 conn.execute(
                     "INSERT INTO events (event_id, type, payload, created_at) VALUES (?, ?, ?, ?)",
-                    (event_id, event_type, payload, time.time())
+                    (event_id, event_type, payload, now)
                 )
                 if event_type in ("PRIMARY_TOOL_DENIED", "STOP_REQUESTED"):
-                    _push_metric_async(event_type, payload)
+                    _push_metric_async(event_type, payload, now)
                 return True
             except sqlite3.IntegrityError:
                 return False
