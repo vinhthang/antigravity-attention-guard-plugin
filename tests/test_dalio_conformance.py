@@ -276,9 +276,12 @@ def test_two_tiered_escalation():
     assert "escalation_counter >= 3" in content
     assert 'explicit human approval ("Proceed")' in content
 
-    # Verify Section 3 preservation
-    assert "### 3. Subagent Liveness Tracking" in content
+    # Verify Section 2 Parallel & Concurrent Execution
+    assert "### 2. Parallel & Concurrent Subagent Execution" in content
+
+    # Verify Subagent Liveness Tracking preservation
+    assert "Subagent Liveness Tracking" in content
     assert 'schedule(DurationSeconds=300' in content
 
-    # Verify Section 4 preservation
-    assert "### 4. Subagent Termination Cleanup" in content
+    # Verify Subagent Termination Cleanup preservation
+    assert "Subagent Termination Cleanup" in content
