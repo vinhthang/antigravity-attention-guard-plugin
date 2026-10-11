@@ -26,17 +26,21 @@ Enforces subagent delegation and lifecycle governance to protect the Primary Age
 <instructions>
 ### 1. Subagent Model Selection Framework
 - **`flash` (Primary Workhorse / Default)**: The first-line choice for both deterministic task execution and rapid root-cause diagnosis. Highly optimized for tool use, low latency, precise schema adherence, and fast feedback loops. When a Primary Agent runs in thinking mode (e.g., Opus, Gemini 4), any dispatched subagents with inherited or unspecified models are automatically coerced to `flash` to preserve execution velocity and enforce delegation discipline.
-- **`pro` (High Reasoning Fallback)**: Reserved for deep architectural investigations, intricate algorithmic roadblocks, or tricky mathematical reasoning when `flash` hits a wall. When executing code mutations, `pro` must follow the sequential write discipline defined in `COORDINATOR.md`.
+- **`pro` (High Reasoning Fallback)**: Reserved for deep architectural investigations, intricate algorithmic roadblocks, or tricky mathematical reasoning when `flash` hits a wall.
 - **`flash_lite` (Read-Only Research)**: Reserved for non-mutating searches, grep lookups, and reading documentation.
 
-### 2. Escalation Protocol & State Machine
+### 2. Parallel & Concurrent Subagent Execution
+- **Parallel Dispatch for Independent Tasks**: When tasks are independent (e.g., separate modules, distinct repositories, non-overlapping files, or disjoint workstreams), the Primary Agent SHOULD spawn multiple subagents in parallel in a single `invoke_subagent` call (`Subagents=[worker1, worker2]`) to maximize execution velocity.
+- **Sequential Execution for Dependent Tasks**: Sequential execution is strictly reserved for tasks with direct data dependencies or overlapping file write sets.
+
+### 3. Escalation Protocol & State Machine
 1. On executor failure, increment `escalation_counter` (keyed by unique `execution_attempt_id`).
 2. Dispatch a Diagnostician (Tier 1: Read-Only Pro Diagnostician or fast Flash Diagnostician) on failure attempt 1 (`escalation_counter == 1`) to isolate root causes (`schemas/diagnostician-payload.json`). Default to `flash` for rapid, grounded tool execution; escalate to `pro` only when deep algorithmic reasoning is required.
 3. If diagnosis is determined and `escalation_counter < 3`, amend the implementation plan and seek explicit human approval ("Proceed") before any re-execution attempt.
 4. If diagnosis is ambiguous or execution fails a second time (`escalation_counter >= 2`), dispatch external second-opinion review (Tier 2: WorkBuddy External Second-Opinion) with diagnostic context.
 5. If execution fails a third time (`escalation_counter >= 3`) or diagnosis remains inconclusive, stop autonomous looping and escalate directly to the human user.
 
-### 3. Subagent Liveness Tracking & Asynchronous Watchdogs
+### 4. Subagent Liveness Tracking & Asynchronous Watchdogs
 - **Mandatory 300s Watchdog**: When spawning subagents via `invoke_subagent` OR launching finite asynchronous background commands via `run_command` (where `IsDaemon` is false), the Primary Agent MUST ALWAYS arm a 300s watchdog timer via `schedule(DurationSeconds=300, TimerCondition="any")`.
 - **Early Cancellation & Re-arming Invariant**:
   - When an async message arrives (subagent payload or background task completion), immediately kill the active timer task if still running.
@@ -49,7 +53,7 @@ Enforces subagent delegation and lifecycle governance to protect the Primary Age
   - If the watchdog fires and a background command has not exited: inspect task status via `manage_task(Action="status")`, examine log tails, and terminate hung tasks via `manage_task(Action="kill")`.
 - **Post-Timeout Escalation**: A watchdog termination is a structural failure (`failure_kind: TIMEOUT_OR_HUNG_PROCESS`). Never swallow timeouts or re-run the exact command blindly. Increment `escalation_counter` and route to Root Cause Diagnosis to isolate why the process blocked (e.g. unbuffered pipe, stdin prompt, deadlock).
 
-### 4. Subagent Termination Cleanup & Lifecycle Reuse
+### 5. Subagent Termination Cleanup & Lifecycle Reuse
 - **Lifecycle Decoupling**: Task completion is decoupled from process lifecycle. When a subagent completes its work and returns a completed payload, it may remain idle in memory for follow-up reuse without blocking turns.
 - **Process Cleanup**: If the Primary Agent explicitly terminates a child subagent (e.g. on timeout or hung process), it must handle dependent subagents cleanly and avoid orphaned processes.
 </instructions>
