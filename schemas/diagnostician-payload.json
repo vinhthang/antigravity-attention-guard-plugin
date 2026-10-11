@@ -15,8 +15,7 @@
     },
     "summary": {
       "type": "string",
-      "minLength": 10,
-      "maxLength": 5000
+      "minLength": 10
     },
     "diagnosis": {
       "type": "object",

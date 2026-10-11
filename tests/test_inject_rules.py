@@ -148,3 +148,95 @@ def test_coordinator_creates_leaf_worker(tmp_path):
 
     assert child_data["may_delegate"] is False
     assert child_data["remaining_depth"] == 0
+
+class TestThinkingModelSubagentCoercion:
+    def test_opus_parent_coerces_inherit_model_to_flash(self):
+        result = run_hook({
+            "conversationId": "parent-opus",
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Subagents": [{"Prompt": "Do work", "Role": "Worker", "Model": "inherit"}]
+                }
+            }
+        })
+        assert result["decision"] == "allow"
+        subagents = result["overwrite"]["Subagents"]
+        assert subagents[0]["Model"] == "flash"
+
+    def test_gemini4_parent_coerces_unset_model_to_flash(self):
+        result = run_hook({
+            "conversationId": "parent-gemini-4",
+            "model": "gemini-4-pro",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Subagents": [{"Prompt": "Do work", "Role": "Worker"}]
+                }
+            }
+        })
+        assert result["decision"] == "allow"
+        subagents = result["overwrite"]["Subagents"]
+        assert subagents[0]["Model"] == "flash"
+
+    def test_gemini4_parent_coerces_empty_model_to_flash(self):
+        result = run_hook({
+            "conversationId": "parent-gemini-4",
+            "model_name": "Gemini 4 Ultra",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Subagents": [{"Prompt": "Do work", "Role": "Worker", "Model": ""}]
+                }
+            }
+        })
+        assert result["decision"] == "allow"
+        subagents = result["overwrite"]["Subagents"]
+        assert subagents[0]["Model"] == "flash"
+
+    def test_thinking_parent_preserves_explicit_pro_model(self):
+        result = run_hook({
+            "conversationId": "parent-opus",
+            "modelName": "claude-opus-4.6",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Subagents": [{"Prompt": "Do architecture", "Role": "Architect", "Model": "pro"}]
+                }
+            }
+        })
+        assert result["decision"] == "allow"
+        subagents = result["overwrite"]["Subagents"]
+        assert subagents[0]["Model"] == "pro"
+
+    def test_non_thinking_parent_does_not_coerce_inherit(self):
+        result = run_hook({
+            "conversationId": "parent-flash",
+            "modelName": "gemini-3.8-flash",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Subagents": [{"Prompt": "Do work", "Role": "Worker", "Model": "inherit"}]
+                }
+            }
+        })
+        assert result["decision"] == "allow"
+        subagents = result["overwrite"]["Subagents"]
+        assert subagents[0]["Model"] == "inherit"
+
+    def test_env_var_thinking_model_coerces_model(self, monkeypatch):
+        monkeypatch.setenv("AGY_PRIMARY_MODEL", "custom-reasoning-model")
+        monkeypatch.setenv("ATTENTION_GUARD_THINKING_MODELS", "custom-reasoning-model,other-model")
+        result = run_hook({
+            "conversationId": "parent-custom",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Subagents": [{"Prompt": "Do work", "Role": "Worker"}]
+                }
+            }
+        })
+        assert result["decision"] == "allow"
+        subagents = result["overwrite"]["Subagents"]
+        assert subagents[0]["Model"] == "flash"

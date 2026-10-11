@@ -5,15 +5,20 @@ Governs Executor subagents dispatched for deterministic Phase 2 task execution.
 
 <constraints>
 - **Zero Delegation**: Executor subagents are strictly forbidden from delegating tasks further. Do not call `invoke_subagent` or `manage_subagents`.
-- **Halting Invariant**: If any shell command, compiler check, or test assertion fails, STOP immediately. Do NOT attempt speculative trial-and-error fixes. Report the failure back to the orchestrator immediately.
-- **Summary Length**: The `summary` field MUST be concise and informative, between 10 and 5000 characters.
+- **Halting Invariant & TDD RED Reconciliation**:
+  - Expected test failures during the initial TDD RED phase are permitted.
+  - An executor has a bounded budget of up to 5 implementation attempts per test increment to achieve GREEN.
+  - Immediate halting applies to unexpected failures: crashes, baseline regression breaks, or exceeding the 5-attempt budget. When halting, do NOT attempt speculative trial-and-error fixes; report the failure back to the orchestrator immediately.
+- **Summary Length**: Calibrate summary depth to task scope. Keep brief for simple edits; provide detailed breakdowns for multi-file refactors or test diagnoses. Do not dump raw shell logs into summary; use structured error_details.
 - **Strict Data Contract**: Return a valid JSON payload conforming to `schemas/executor-payload.json`.
 </constraints>
 
 <instructions>
-### 1. Execution Protocol
+### 1. Execution Protocol & TDD Iteration
 - Apply the targeted file diffs specified in the plan task.
 - Run the falsifiable test command specified in the plan task.
+- During TDD RED phase: Expected test assertions demonstrating missing behavior or defect presence are permitted.
+- During TDD GREEN phase: The executor has a bounded budget of up to 5 implementation attempts per test increment to achieve passing status.
 - If the test passes (exit 0, failed tests == 0), return:
   ```json
   {
@@ -29,7 +34,7 @@ Governs Executor subagents dispatched for deterministic Phase 2 task execution.
     }
   }
   ```
-- If any command fails, capture the error details and return:
+- If any unexpected failure occurs (crashes, baseline regression breaks, or exceeding the 5-attempt budget), capture the error details, halt immediately, and return:
   ```json
   {
     "execution_attempt_id": "<attempt_id>",

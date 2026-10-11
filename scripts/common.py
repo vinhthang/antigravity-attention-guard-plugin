@@ -2,7 +2,102 @@ import sys
 import os
 import json
 import re
+import shlex
 from ledger import Ledger
+
+DEFAULT_THINKING_MODELS = ["opus", "gemini-4", "gemini 4"]
+
+def get_primary_model(data=None):
+    if isinstance(data, dict):
+        model = data.get("modelName") or data.get("model") or data.get("model_name")
+        if model:
+            return str(model).strip()
+    env_model = os.environ.get("AGY_PRIMARY_MODEL") or os.environ.get("ANTIGRAVITY_MODEL")
+    if env_model:
+        return env_model.strip()
+    return ""
+
+def is_thinking_model(model_name):
+    if not model_name or not isinstance(model_name, str):
+        return False
+    env_models = os.environ.get("ATTENTION_GUARD_THINKING_MODELS")
+    if env_models:
+        candidates = [m.strip().lower() for m in env_models.split(",") if m.strip()]
+    else:
+        candidates = [m.lower() for m in DEFAULT_THINKING_MODELS]
+    name_lower = model_name.lower()
+    return any(cand in name_lower for cand in candidates)
+
+def is_markdown_file(file_path):
+    if not file_path or not isinstance(file_path, str):
+        return False
+    path_lower = file_path.lower()
+    return path_lower.endswith(".md") or path_lower.endswith(".markdown")
+
+def is_build_command(cmd_str):
+    if not cmd_str or not isinstance(cmd_str, str):
+        return False
+    try:
+        tokens = shlex.split(cmd_str)
+    except Exception:
+        tokens = cmd_str.split()
+    while tokens and tokens[0] == "rtk":
+        tokens.pop(0)
+    if not tokens:
+        return False
+
+    bin_name = os.path.basename(tokens[0]).lower()
+    for ext in (".exe", ".cmd", ".bat"):
+        if bin_name.endswith(ext):
+            bin_name = bin_name[:-len(ext)]
+            break
+
+    # Direct build tools / generators
+    if bin_name in {"make", "cmake", "ninja"}:
+        return True
+
+    # Python pip
+    if bin_name in {"pip", "pip3"}:
+        return True
+
+    # python -m pip ...
+    if bin_name in {"python", "python3"}:
+        lower_tokens = [t.lower() for t in tokens[1:]]
+        if "pip" in lower_tokens:
+            return True
+
+    # Cargo
+    if bin_name == "cargo":
+        lower_tokens = [t.lower() for t in tokens[1:]]
+        if any(t in {"build", "check", "install"} for t in lower_tokens):
+            return True
+
+    # Go
+    if bin_name == "go":
+        lower_tokens = [t.lower() for t in tokens[1:]]
+        if any(t in {"build", "install"} for t in lower_tokens):
+            return True
+
+    # Node / JS
+    if bin_name in {"npm", "pnpm", "yarn", "bun"}:
+        lower_tokens = [t.lower() for t in tokens[1:]]
+        if any(t in {"install", "i", "ci", "add", "build", "compile"} for t in lower_tokens):
+            return True
+        if "run" in lower_tokens and any(t in {"build", "compile"} for t in lower_tokens):
+            return True
+
+    # Java / JVM build tools
+    if bin_name in {"mvn", "mvnw"}:
+        lower_tokens = [t.lower() for t in tokens[1:]]
+        if any(t in {"compile", "install", "package", "verify", "build"} for t in lower_tokens):
+            return True
+
+    if bin_name in {"gradle", "gradlew"}:
+        lower_tokens = [t.lower() for t in tokens[1:]]
+        if any(t in {"build", "compile", "assemble", "install"} for t in lower_tokens):
+            return True
+
+    return False
 
 def get_cache_dir():
     base = os.environ.get("AGY_APP_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".gemini", "antigravity")

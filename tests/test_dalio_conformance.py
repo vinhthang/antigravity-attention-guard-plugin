@@ -173,6 +173,24 @@ class TestSchemas:
         ok, err = payload_validator.validate_payload("coordinator", payload)
         assert not ok, "Coordinator completed with failed child must be rejected"
 
+class TestDalioConformance:
+    def test_large_summary_accepted(self):
+        payload = {
+            "execution_attempt_id": TEST_UUID,
+            "status": "completed",
+            "summary": "A" * 8000,
+            "files_modified": ["src/app.py"],
+            "test_results": {
+                "passed": 5,
+                "failed": 0,
+                "total": 5,
+                "command_executed": "rtk pytest tests/test_app.py"
+            }
+        }
+        ok, err = payload_validator.validate_payload("executor", payload)
+        assert (ok, err) == (True, None)
+
+
 class TestCommandValidator:
     def test_allowed_commands(self):
         ws = PLUGIN_ROOT

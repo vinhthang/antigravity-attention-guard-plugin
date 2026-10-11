@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
-import sys, os, json, shlex
+import sys, os, json, shlex, re
 sys.path.insert(0, os.path.dirname(__file__))
-from common import is_subagent, get_turn_state
+from common import (
+    is_subagent,
+    get_turn_state,
+    get_primary_model,
+    is_thinking_model,
+    is_markdown_file,
+    is_build_command,
+)
 from ledger import Ledger
 from fsm import Event
 from command_validator import validate_command
@@ -143,10 +150,18 @@ def is_plan_execution_active(transcript_path, artifact_dir=None):
 
                 # Check for plan approval ONLY from user explicit input
                 if source == "USER_EXPLICIT" and step_type == "USER_INPUT":
-                    if "the user has approved this document" in content_lower:
+                    # Strip system-injected metadata (e.g. <ADDITIONAL_METADATA> which contains /plan definition)
+                    clean_content = re.sub(r"<ADDITIONAL_METADATA>.*?</ADDITIONAL_METADATA>", "", content, flags=re.DOTALL)
+                    clean_content_lower = clean_content.lower()
+
+                    # An invocation of /plan is a planning command, never an approval to execute
+                    if "/plan" in clean_content_lower:
+                        continue
+
+                    if "the user has approved this document" in clean_content_lower:
                         last_approval_idx = idx
-                    elif "proceed" in content_lower:
-                        if "implementation_plan" in content_lower or seen_implementation_plan or has_plan_file:
+                    elif re.search(r"\bproceed\b", clean_content_lower):
+                        if "implementation_plan" in clean_content_lower or seen_implementation_plan or has_plan_file:
                             last_approval_idx = idx
 
                 # Deactivate plan mode when walkthrough.md is generated via tool calls or model response
@@ -203,14 +218,30 @@ def main(argv=None, stdin=None, stdout=None):
                 base = os.environ.get("AGY_APP_DATA_DIR") or os.path.expanduser("~/.gemini/antigravity")
                 artifact_dir = os.path.join(base, "brain", conv_id) if conv_id else ""
 
+            model = get_primary_model(data)
+            if is_thinking_model(model):
+                if tool_name in ["write_to_file", "default_api:write_to_file", "replace_file_content", "default_api:replace_file_content"]:
+                    target_file = args.get("TargetFile") or args.get("target_file") or args.get("path") or ""
+                    if is_markdown_file(target_file) or is_artifact_path(target_file, artifact_dir):
+                        return emit({"decision": "allow"})
+                    return emit_deny(f"Attention Dilution Guard: Thinking Mode Restriction. Primary Agent ({model}) is restricted to thinking, planning, and markdown documentation. Non-markdown code modifications must be delegated to a flash subagent via invoke_subagent.")
+
+                if tool_name in ["run_command", "default_api:run_command"]:
+                    cmd = args.get("CommandLine", "")
+                    if is_test_command(cmd) or is_build_command(cmd):
+                        return emit_deny(f"Attention Dilution Guard: Thinking Mode Restriction. Primary Agent ({model}) is forbidden from running tests or build commands directly. Delegate execution to a flash subagent via invoke_subagent.")
+                    return emit({"decision": "allow"})
+
+                return emit({"decision": "allow"})
+
             if is_plan_execution_active(transcript_path, artifact_dir):
                 if tool_name in ["write_to_file", "default_api:write_to_file"]:
-                    target_file = args.get("TargetFile", "")
+                    target_file = args.get("TargetFile") or args.get("target_file") or args.get("path") or ""
                     if not is_artifact_path(target_file, artifact_dir):
                         return emit_deny("Attention Dilution Guard: Primary Agent is forbidden from directly mutating workspace code during an active implementation plan. Delegate implementation to a subagent via invoke_subagent.")
 
                 if tool_name in ["replace_file_content", "default_api:replace_file_content"]:
-                    target_file = args.get("TargetFile", "")
+                    target_file = args.get("TargetFile") or args.get("target_file") or args.get("path") or ""
                     if not is_artifact_path(target_file, artifact_dir):
                         return emit_deny("Attention Dilution Guard: Primary Agent is forbidden from directly mutating workspace code during an active implementation plan. Delegate implementation to a subagent via invoke_subagent.")
 

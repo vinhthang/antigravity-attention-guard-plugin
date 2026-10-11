@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys, os, json, uuid, time
 sys.path.insert(0, os.path.dirname(__file__))
-from common import is_subagent, get_turn_state
+from common import is_subagent, get_turn_state, get_primary_model, is_thinking_model
 from ledger import Ledger
 
 def main(argv=None, stdin=None, stdout=None):
@@ -24,15 +24,20 @@ def main(argv=None, stdin=None, stdout=None):
         exec_rules_text = open(executor_rule, "r").read() if os.path.exists(executor_rule) else ""
         coord_rules_text = open(coordinator_rule, "r").read() if os.path.exists(coordinator_rule) else ""
         tool_call = payload.get("toolCall", {})
-        if tool_call.get("name") == "invoke_subagent":
+        if tool_call.get("name") in ["invoke_subagent", "default_api:invoke_subagent"]:
             args = tool_call.get("args", {})
             subagents = args.get("Subagents", [])
             parent_conv_id = payload.get("conversationId", "unknown")
             step_idx = payload.get("stepIdx", 0)
             turn_id, _ = get_turn_state(payload.get("transcriptPath", ""))
             is_sub, current_may_delegate, current_depth, _, _ = is_subagent(payload)
+            parent_is_thinking = is_thinking_model(get_primary_model(payload))
             ledger = Ledger()
             for sa in subagents:
+                if parent_is_thinking:
+                    model_val = sa.get("Model")
+                    if model_val in (None, "", "inherit"):
+                        sa["Model"] = "flash"
                 type_name = sa.get("TypeName", "")
                 if is_sub:
                     child_may_delegate, child_depth = False, 0

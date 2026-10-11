@@ -148,35 +148,60 @@ def sync_events(
 
     for b_idx, batch in enumerate(batches, 1):
         print(f"\n--- Batch {b_idx}/{len(batches)} ({len(batch)} items) ---")
-        for item in batch:
-            event_id = item.get("event_id", "unknown")
-            event_type = item.get("type", "UNKNOWN")
-            raw_payload = item.get("payload", "")
-            raw_created_at = item.get("created_at")
+        if dry_run:
+            for item in batch:
+                event_id = item.get("event_id", "unknown")
+                event_type = item.get("type", "UNKNOWN")
+                raw_created_at = item.get("created_at")
+                iso_created_at = format_iso_timestamp(raw_created_at)
+                print(f"  [DRY-RUN] Would sync {event_type} (id: {event_id}, timestamp: {iso_created_at})")
+            synced_count += len(batch)
+            continue
 
-            # Parse payload if json
+        # Format batch
+        batch_payload = []
+        for item in batch:
+            raw_payload = item.get("payload", "")
             if isinstance(raw_payload, str):
                 try:
                     payload = json.loads(raw_payload)
-                except Exception as exc:
-                    _ = exc
-                    payload = raw_payload
+                except Exception:
+                    payload = {"raw": raw_payload} if raw_payload else {}
             else:
-                payload = raw_payload
+                payload = raw_payload or {}
 
-            iso_created_at = format_iso_timestamp(raw_created_at)
+            if not isinstance(payload, (dict, list)):
+                payload = {"value": payload}
 
-            if dry_run:
-                print(f"  [DRY-RUN] Would sync {event_type} (id: {event_id}, timestamp: {iso_created_at})")
-                synced_count += 1
-            else:
-                ok, msg = send_metric_event(actual_server_url, event_type, payload, iso_created_at, headers)
-                if ok:
-                    synced_count += 1
-                    print(f"  [OK] Synced {event_type} (id: {event_id}) -> {msg}")
+            batch_payload.append({
+                "event_type": item.get("type", "UNKNOWN"),
+                "payload": payload,
+                "created_at": format_iso_timestamp(item.get("created_at"))
+            })
+
+        data = json.dumps(batch_payload).encode("utf-8")
+        req = urllib.request.Request(actual_server_url, data=data, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, context=_SSL_CONTEXT, timeout=30) as resp:
+                if resp.status in (200, 201):
+                    synced_count += len(batch_payload)
+                    print(f"  [OK] Synced batch {b_idx} ({len(batch_payload)} items) -> HTTP {resp.status}")
                 else:
-                    failed_count += 1
-                    print(f"  [ERROR] Failed to sync {event_type} (id: {event_id}): {msg}", file=sys.stderr)
+                    failed_count += len(batch_payload)
+                    print(f"  [ERROR] Failed to sync batch {b_idx}: HTTP {resp.status}", file=sys.stderr)
+        except urllib.error.HTTPError as err:
+            failed_count += len(batch_payload)
+            err_msg = f"HTTP {err.code}: {err.reason}"
+            try:
+                err_body = err.read().decode("utf-8", errors="replace")
+                if err_body:
+                    err_msg += f" - {err_body}"
+            except Exception:
+                _ = True
+            print(f"  [ERROR] Failed to sync batch {b_idx}: {err_msg}", file=sys.stderr)
+        except Exception as exc:
+            failed_count += len(batch_payload)
+            print(f"  [ERROR] Failed to sync batch {b_idx}: {exc}", file=sys.stderr)
 
     print(f"\nSync summary: {synced_count} synced, {failed_count} failed out of {total_events} total events.")
     return {

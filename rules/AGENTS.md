@@ -8,6 +8,10 @@ Enforces subagent delegation and lifecycle governance to protect the Primary Age
   - The Primary Agent focuses on strategic reasoning, architectural design, and workstream coordination.
   - Multi-step implementations, noisy builds, and repetitive test runs must be delegated to subagents to prevent context window bloat. Quick one-offs, single-file edits, configuration adjustments, and direct user prompts may proceed directly.
   - Multi-step implementation plans require explicit human approval ("Proceed") before execution subagents are dispatched.
+- **Thinking Mode Primary Agent Restrictions**:
+  - When the Primary Agent operates under a thinking model (e.g., Opus, Gemini 4), it is strictly restricted to thinking, planning, and markdown documentation (`.md`, `.markdown`, or artifacts).
+  - Code mutations (`write_to_file`, `replace_file_content` on non-markdown workspace files) and execution commands (`is_test_command`, `is_build_command`) must be delegated via `invoke_subagent(TypeName="self", Model="flash", Role="<Role Name>")`.
+  - Child subagents inheriting or omitting model configurations under a thinking parent are automatically coerced to `flash`.
 - **Problem Intolerance & Root Cause Focus**:
   - Zero error suppression: Never ignore failures, swallow exceptions with bare `pass`, or mask errors with `|| true`. Any command failure or assertion break is a structural blocker.
   - When an execution subagent fails, avoid speculative trial-and-error edits in the main thread (the primary cause of attention dilution). Dispatch a Diagnostician (Tier 1: Read-Only Pro Diagnostician or fast Flash Diagnostician) to isolate root causes before attempting fixes.
@@ -15,13 +19,13 @@ Enforces subagent delegation and lifecycle governance to protect the Primary Age
   - Subagents must return structured JSON conforming to role schemas in `schemas/`.
   - Every payload must include an immutable `execution_attempt_id` (UUID format) and a concise summary.
   - Validate returned subagent payloads using:
-    `rtk python3 scripts/payload_validator.py --role <executor|diagnostician|coordinator> --payload '<json>'`
+    `rtk python3 /Users/thanghoang/.gemini/config/plugins/attention-guard/scripts/payload_validator.py --role <executor|diagnostician|coordinator> --payload '<json>'`
 - Validation failures trigger `failure_kind: PAYLOAD_SCHEMA_VIOLATION` and route to Root Cause Diagnosis.
 </constraints>
 
 <instructions>
 ### 1. Subagent Model Selection Framework
-- **`flash` (Primary Workhorse / Default)**: The first-line choice for both deterministic task execution and rapid root-cause diagnosis. Highly optimized for tool use, low latency, precise schema adherence, and fast feedback loops.
+- **`flash` (Primary Workhorse / Default)**: The first-line choice for both deterministic task execution and rapid root-cause diagnosis. Highly optimized for tool use, low latency, precise schema adherence, and fast feedback loops. When a Primary Agent runs in thinking mode (e.g., Opus, Gemini 4), any dispatched subagents with inherited or unspecified models are automatically coerced to `flash` to preserve execution velocity and enforce delegation discipline.
 - **`pro` (High Reasoning Fallback)**: Reserved for deep architectural investigations, intricate algorithmic roadblocks, or tricky mathematical reasoning when `flash` hits a wall. When executing code mutations, `pro` must follow the sequential write discipline defined in `COORDINATOR.md`.
 - **`flash_lite` (Read-Only Research)**: Reserved for non-mutating searches, grep lookups, and reading documentation.
 

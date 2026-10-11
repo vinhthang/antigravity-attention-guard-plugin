@@ -8,3 +8,4 @@ venv/
 
 review.json
 diagnostic_review.json
+.codegraph/

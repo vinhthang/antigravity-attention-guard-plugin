@@ -64,7 +64,7 @@ class TestSubagentDetection:
 
     def test_primary_agent_write_and_replace_allowed(self):
         res_write = run_hook({
-            "modelName": "claude-opus-4.6",
+            "modelName": "gemini-3.8-flash",
             "toolCall": {
                 "name": "write_to_file",
                 "args": {"TargetFile": "/some/repo/file.py", "CodeContent": "print('hello')"}
@@ -73,7 +73,7 @@ class TestSubagentDetection:
         assert res_write["decision"] == "allow"
 
         res_replace = run_hook({
-            "modelName": "claude-opus-4.6",
+            "modelName": "gemini-3.8-flash",
             "toolCall": {
                 "name": "replace_file_content",
                 "args": {"TargetFile": "/some/repo/file.py", "TargetContent": "a", "ReplacementContent": "b"}
@@ -283,6 +283,55 @@ class TestPrimaryAgentPlanDelegationEnforcement:
         )
         assert enforce_mod.is_plan_execution_active(str(transcript), str(tmp_path)) is False
 
+    def test_plan_slash_command_does_not_activate_plan_execution(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        (artifact_dir / "implementation_plan.md").write_text("# Plan")
+
+        # User invokes /plan with injected <ADDITIONAL_METADATA> containing "proceeding"
+        plan_content = (
+            "<USER_REQUEST>\n"
+            "/plan so you will create an ANO ticket to address this\n"
+            "</USER_REQUEST>\n"
+            "<ADDITIONAL_METADATA>\n"
+            "/plan is a [Slash Command]:\n"
+            "<PLAN>\n"
+            "The user is requesting that you think and plan carefully before executing the upcoming task.\n"
+            "Clarify them with the user before proceeding.\n"
+            "Implementation Plan\n"
+            "Path: <Artifact Directory>/implementation_plan.md\n"
+            "</PLAN>\n"
+            "</ADDITIONAL_METADATA>"
+        )
+        transcript.write_text(json.dumps({"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": plan_content}) + "\n")
+        assert enforce_mod.is_plan_execution_active(str(transcript), str(artifact_dir)) is False
+
+        # User invokes /plan mentioning the word proceed in user request
+        plan_content_with_proceed = (
+            "<USER_REQUEST>\n"
+            "/plan how to proceed with refactoring the auth service\n"
+            "</USER_REQUEST>"
+        )
+        transcript.write_text(json.dumps({"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": plan_content_with_proceed}) + "\n")
+        assert enforce_mod.is_plan_execution_active(str(transcript), str(artifact_dir)) is False
+
+        # Primary Agent write_to_file on repo doc during /plan is allowed
+        payload_write_spec = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": "gemini-3.8-flash",
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": "/repo/docs/specs/INDEX.md",
+                    "CodeContent": "# Specification Index"
+                }
+            }
+        }
+        res = run_hook(payload_write_spec)
+        assert res["decision"] == "allow"
+
     def test_write_to_file_repo_denied_during_active_plan(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
         artifact_dir = tmp_path / "artifacts"
@@ -483,7 +532,7 @@ class TestPrimaryAgentPlanDelegationEnforcement:
         payload_test = {
             "transcriptPath": str(transcript),
             "artifactDirectoryPath": str(artifact_dir),
-            "modelName": "claude-opus-4.6",
+            "modelName": "gemini-3.8-flash",
             "toolCall": {
                 "name": "run_command",
                 "args": {"CommandLine": "rtk pytest tests/"}
@@ -502,7 +551,7 @@ class TestPrimaryAgentPlanDelegationEnforcement:
         payload = {
             "transcriptPath": str(transcript),
             "artifactDirectoryPath": str(artifact_dir),
-            "modelName": "claude-opus-4.6",
+            "modelName": "gemini-3.8-flash",
             "toolCall": {
                 "name": "write_to_file",
                 "args": {"TargetFile": "/repo/src/core.py", "CodeContent": "def done(): pass"}
@@ -585,7 +634,7 @@ class TestPrimaryAgentPlanDelegationEnforcement:
         payload = {
             "transcriptPath": str(transcript),
             "artifactDirectoryPath": str(artifact_dir),
-            "modelName": "claude-opus-4.6",
+            "modelName": "gemini-3.8-flash",
             "toolCall": {
                 "name": "write_to_file",
                 "args": {
@@ -596,4 +645,257 @@ class TestPrimaryAgentPlanDelegationEnforcement:
         }
         res = run_hook(payload)
         assert res["decision"] == "deny"
+
+
+class TestThinkingModeRestrictions:
+    def test_opus_gemini4_writing_markdown_allowed(self):
+        for model in ["claude-opus-4.6", "gemini-4-pro", "Gemini 4 Ultra"]:
+            payload = {
+                "modelName": model,
+                "toolCall": {
+                    "name": "write_to_file",
+                    "args": {"TargetFile": "/repo/docs/architecture.md", "CodeContent": "# Arch"}
+                }
+            }
+            res = run_hook(payload)
+            assert res["decision"] == "allow", f"Expected markdown write to be allowed for {model}"
+
+            # Also test .markdown extension
+            payload_ext = {
+                "modelName": model,
+                "toolCall": {
+                    "name": "write_to_file",
+                    "args": {"TargetFile": "/repo/docs/spec.markdown", "CodeContent": "# Spec"}
+                }
+            }
+            assert run_hook(payload_ext)["decision"] == "allow"
+
+    def test_opus_gemini4_writing_non_markdown_denied(self):
+        for model in ["claude-opus-4.6", "gemini-4-pro", "Gemini 4"]:
+            for non_md in ["/repo/src/main.py", "/repo/src/index.ts", "/repo/src/lib.rs", "/repo/pom.xml"]:
+                payload = {
+                    "modelName": model,
+                    "toolCall": {
+                        "name": "write_to_file",
+                        "args": {"TargetFile": non_md, "CodeContent": "code"}
+                    }
+                }
+                res = run_hook(payload)
+                assert res["decision"] == "deny", f"Expected {non_md} write to be denied for {model}"
+                assert "Thinking Mode Restriction" in res["reason"]
+
+    def test_opus_gemini4_replacing_markdown_allowed(self):
+        for model in ["claude-opus-4.6", "gemini-4-pro"]:
+            payload = {
+                "modelName": model,
+                "toolCall": {
+                    "name": "replace_file_content",
+                    "args": {
+                        "TargetFile": "/repo/README.md",
+                        "TargetContent": "old",
+                        "ReplacementContent": "new"
+                    }
+                }
+            }
+            res = run_hook(payload)
+            assert res["decision"] == "allow", f"Expected markdown replace to be allowed for {model}"
+
+    def test_opus_gemini4_replacing_non_markdown_denied(self):
+        for model in ["claude-opus-4.6", "gemini-4-pro"]:
+            for non_md in ["/repo/src/app.py", "/repo/src/app.ts"]:
+                payload = {
+                    "modelName": model,
+                    "toolCall": {
+                        "name": "replace_file_content",
+                        "args": {
+                            "TargetFile": non_md,
+                            "TargetContent": "old",
+                            "ReplacementContent": "new"
+                        }
+                    }
+                }
+                res = run_hook(payload)
+                assert res["decision"] == "deny", f"Expected {non_md} replace to be denied for {model}"
+                assert "Thinking Mode Restriction" in res["reason"]
+
+    def test_opus_gemini4_running_pytest_denied(self):
+        for model in ["claude-opus-4.6", "gemini-4-pro", "gemini 4"]:
+            for test_cmd in ["pytest", "rtk pytest tests/", "python3 -m pytest", "python -m unittest"]:
+                payload = {
+                    "modelName": model,
+                    "toolCall": {
+                        "name": "run_command",
+                        "args": {"CommandLine": test_cmd}
+                    }
+                }
+                res = run_hook(payload)
+                assert res["decision"] == "deny", f"Expected test command '{test_cmd}' to be denied for {model}"
+                assert "Thinking Mode Restriction" in res["reason"]
+
+    def test_opus_gemini4_running_build_commands_denied(self):
+        build_cmds = [
+            "cargo build",
+            "npm run build",
+            "npm install",
+            "yarn build",
+            "pip install -r requirements.txt",
+            "mvn compile",
+            "mvn install",
+            "gradle build",
+            "make",
+            "cmake",
+            "rtk cargo build",
+            "rtk npm install",
+        ]
+        for model in ["claude-opus-4.6", "gemini-4-pro", "Gemini 4"]:
+            for build_cmd in build_cmds:
+                payload = {
+                    "modelName": model,
+                    "toolCall": {
+                        "name": "run_command",
+                        "args": {"CommandLine": build_cmd}
+                    }
+                }
+                res = run_hook(payload)
+                assert res["decision"] == "deny", f"Expected build command '{build_cmd}' to be denied for {model}"
+                assert "Thinking Mode Restriction" in res["reason"]
+
+    def test_opus_gemini4_running_read_only_commands_allowed(self):
+        read_only_cmds = [
+            "git status",
+            "git diff",
+            "git log -n 5",
+            "ls -la",
+            "rtk git status",
+            "rtk rg 'pattern'",
+            "grep -rn 'foo' .",
+        ]
+        for model in ["claude-opus-4.6", "gemini-4-pro", "Gemini 4"]:
+            for cmd in read_only_cmds:
+                payload = {
+                    "modelName": model,
+                    "toolCall": {
+                        "name": "run_command",
+                        "args": {"CommandLine": cmd}
+                    }
+                }
+                res = run_hook(payload)
+                assert res["decision"] == "allow", f"Expected read-only command '{cmd}' to be allowed for {model}"
+
+    def test_non_thinking_agent_retains_adaptive_plan_behavior(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+
+        flash_model = "gemini-3.8-flash"
+
+        # 1. Without active plan, non-thinking agent can mutate code and run build
+        payload_write_ok = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": flash_model,
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {"TargetFile": "/repo/src/core.py", "CodeContent": "def quick(): pass"}
+            }
+        }
+        assert run_hook(payload_write_ok)["decision"] == "allow"
+
+        payload_build_ok = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": flash_model,
+            "toolCall": {
+                "name": "run_command",
+                "args": {"CommandLine": "cargo build"}
+            }
+        }
+        assert run_hook(payload_build_ok)["decision"] == "allow"
+
+        # 2. Activate plan
+        transcript.write_text(
+            '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
+        )
+
+        # Non-thinking agent is now blocked from mutating workspace code
+        payload_write_plan = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": flash_model,
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {"TargetFile": "/repo/src/core.py", "CodeContent": "def plan(): pass"}
+            }
+        }
+        res_plan = run_hook(payload_write_plan)
+        assert res_plan["decision"] == "deny"
+        assert "active implementation plan" in res_plan["reason"]
+
+        # But artifact files are allowed
+        payload_art = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": flash_model,
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {"TargetFile": str(artifact_dir / "notes.md"), "CodeContent": "# Notes"}
+            }
+        }
+        assert run_hook(payload_art)["decision"] == "allow"
+
+
+class TestThinkingModelHelpers:
+    def test_get_primary_model_keys(self, monkeypatch):
+        from common import get_primary_model
+        assert get_primary_model({"modelName": "m1"}) == "m1"
+        assert get_primary_model({"model": "m2"}) == "m2"
+        assert get_primary_model({"model_name": "m3"}) == "m3"
+        monkeypatch.setenv("AGY_PRIMARY_MODEL", "env1")
+        assert get_primary_model({}) == "env1"
+        monkeypatch.delenv("AGY_PRIMARY_MODEL")
+        monkeypatch.setenv("ANTIGRAVITY_MODEL", "env2")
+        assert get_primary_model({}) == "env2"
+
+    def test_is_thinking_model_matching(self, monkeypatch):
+        from common import is_thinking_model
+        assert is_thinking_model("claude-opus-4.6") is True
+        assert is_thinking_model("claude-3-opus") is True
+        assert is_thinking_model("gemini-4-pro") is True
+        assert is_thinking_model("Gemini 4 Ultra") is True
+        assert is_thinking_model("gemini-3.8-flash") is False
+        assert is_thinking_model("gpt-4o") is False
+        assert is_thinking_model("") is False
+        assert is_thinking_model(None) is False
+
+        monkeypatch.setenv("ATTENTION_GUARD_THINKING_MODELS", "custom-model, reason-ai")
+        assert is_thinking_model("custom-model-v2") is True
+        assert is_thinking_model("reason-ai") is True
+        assert is_thinking_model("claude-opus-4.6") is False
+
+    def test_is_markdown_file_matching(self):
+        from common import is_markdown_file
+        assert is_markdown_file("README.md") is True
+        assert is_markdown_file("DOCS.MARKDOWN") is True
+        assert is_markdown_file("/path/to/file.md") is True
+        assert is_markdown_file("main.py") is False
+        assert is_markdown_file("index.ts") is False
+        assert is_markdown_file("") is False
+        assert is_markdown_file(None) is False
+
+    def test_is_build_command_matching(self):
+        from common import is_build_command
+        assert is_build_command("cargo build") is True
+        assert is_build_command("npm run build") is True
+        assert is_build_command("npm install") is True
+        assert is_build_command("yarn build") is True
+        assert is_build_command("pip install requests") is True
+        assert is_build_command("mvn compile") is True
+        assert is_build_command("mvn install") is True
+        assert is_build_command("gradle build") is True
+        assert is_build_command("make") is True
+        assert is_build_command("cmake .") is True
+        assert is_build_command("git status") is False
+        assert is_build_command("git diff") is False
+        assert is_build_command("ls") is False
+
 
