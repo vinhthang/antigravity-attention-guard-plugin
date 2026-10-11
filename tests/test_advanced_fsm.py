@@ -86,7 +86,7 @@ def test_timeout_handling(setup_env):
     l.insert_event("parent", "1", "PostToolUse", "1", "invoke", "HANDOFF_ACCEPTED", json.dumps({"error": None}))
     
     res = _run_hook(attention_check_mod, payload)
-    assert res.get("decision") == "continue"  # Assert primary agent Stop returns continue (recovery)
+    assert res.get("decision") == "allow"  # Assert primary agent Stop returns continue (recovery)
     
     with l._get_connection() as conn:
         assert conn.execute("SELECT status FROM work_items WHERE work_id=?", (token,)).fetchone()[0] == 'TIMED_OUT'

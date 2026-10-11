@@ -624,14 +624,14 @@ class TestPrimaryAgentPlanDelegationEnforcement:
         )
         assert enforce_mod.is_plan_execution_active(str(transcript), str(artifact_dir)) is True
 
-    def test_write_to_file_repo_walkthrough_denied_during_active_plan(self, tmp_path):
+    def test_write_to_file_repo_walkthrough_allowed_during_active_plan(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
         artifact_dir = tmp_path / "artifacts"
         artifact_dir.mkdir(parents=True, exist_ok=True)
         transcript.write_text(
             '{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "The user has approved this document: /artifacts/implementation_plan.md"}\n'
         )
-        payload = {
+        payload_md = {
             "transcriptPath": str(transcript),
             "artifactDirectoryPath": str(artifact_dir),
             "modelName": "gemini-3.8-flash",
@@ -643,8 +643,23 @@ class TestPrimaryAgentPlanDelegationEnforcement:
                 }
             }
         }
-        res = run_hook(payload)
-        assert res["decision"] == "deny"
+        res = run_hook(payload_md)
+        assert res["decision"] == "allow"
+
+        payload_code = {
+            "transcriptPath": str(transcript),
+            "artifactDirectoryPath": str(artifact_dir),
+            "modelName": "gemini-3.8-flash",
+            "toolCall": {
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": "/repo/app.py",
+                    "CodeContent": "print(1)"
+                }
+            }
+        }
+        res_code = run_hook(payload_code)
+        assert res_code["decision"] == "deny"
 
 
 class TestThinkingModeRestrictions:

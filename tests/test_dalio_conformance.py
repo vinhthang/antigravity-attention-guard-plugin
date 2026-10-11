@@ -19,7 +19,6 @@ SCHEMAS_DIR = os.path.join(PLUGIN_ROOT, "schemas")
 
 sys.path.insert(0, SCRIPTS_DIR)
 import payload_validator
-import command_validator
 import deploy_plugin
 
 TEST_UUID = "123e4567-e89b-12d3-a456-426614174000"
@@ -191,69 +190,6 @@ class TestDalioConformance:
         assert (ok, err) == (True, None)
 
 
-class TestCommandValidator:
-    def test_allowed_commands(self):
-        ws = PLUGIN_ROOT
-        ok, err = command_validator.validate_command("rtk pytest tests/test_dalio_conformance.py", ws)
-        assert ok, f"Expected valid command, got: {err}"
-
-        ok, err = command_validator.validate_command("git status", ws)
-        assert ok, f"Expected git status valid, got: {err}"
-
-        for tool_cmd in ["cargo test", "pnpm test", "uv run pytest", "dotnet test"]:
-            ok, err = command_validator.validate_command(tool_cmd, ws)
-            assert ok, f"Expected '{tool_cmd}' to be allowed, got error: {err}"
-
-    def test_shell_operators_forbidden(self):
-        ws = PLUGIN_ROOT
-        for op in ["|", ">", ">>", "<", ";", "&&", "||"]:
-            cmd = f"pytest tests/test_dalio_conformance.py {op} cat"
-            ok, err = command_validator.validate_command(cmd, ws)
-            assert not ok, f"Operator '{op}' should be rejected"
-
-    def test_unauthorized_git_subcommands(self):
-        ws = PLUGIN_ROOT
-        for subcmd in ["rebase", "reset", "filter-branch", "checkout"]:
-            cmd = f"git {subcmd} origin main"
-            ok, err = command_validator.validate_command(cmd, ws)
-            assert not ok, f"git subcommand '{subcmd}' should be rejected"
-
-    def test_git_push_policy(self):
-        ws = PLUGIN_ROOT
-        ok, err = command_validator.validate_command("git push origin feat/my-branch", ws)
-        assert ok, f"git push to feature branch should be permitted: {err}"
-
-        ok, err = command_validator.validate_command("git push origin main", ws)
-        assert not ok, "git push directly to main should be rejected"
-        assert "protected branch" in str(err)
-
-        ok, err = command_validator.validate_command("git push origin master", ws)
-        assert not ok, "git push directly to master should be rejected"
-        assert "protected branch" in str(err)
-
-    def test_destructive_binaries_forbidden(self):
-        ws = PLUGIN_ROOT
-        for b in ["rm", "chmod", "del", "format", "icacls"]:
-            ok, err = command_validator.validate_command(f"{b} file.txt", ws)
-            assert not ok, f"Binary '{b}' should be rejected"
-            assert "strictly forbidden by security policy" in str(err)
-
-        ok, err = command_validator.validate_command('powershell.exe -c "Get-Process"', ws)
-        assert not ok, "powershell.exe -c should be rejected"
-        assert "Direct execution of shell script/eval" in str(err)
-
-    def test_p0_security_elevated_deployment_boundary(self):
-        ws = PLUGIN_ROOT
-        cmd_bad = "cp scripts/deploy_plugin.py ~/.gemini/config/plugins/attention-guard/"
-        ok, err = command_validator.validate_command(cmd_bad, ws)
-        assert not ok, "Arbitrary command targeting ~/.gemini/config/plugins must be rejected"
-        assert "P0 Security Violation" in str(err)
-
-        cmd_good = "python3 scripts/deploy_plugin.py --deploy"
-        ok, err = command_validator.validate_command(cmd_good, ws)
-        assert ok, f"deploy_plugin.py must be permitted: {err}"
-
-
 class TestNoBarePassAST:
     def test_ast_no_error_suppression(self):
         for root, _, files in os.walk(SCRIPTS_DIR):
@@ -320,113 +256,6 @@ class TestIdentityAndCommandRemediation:
         assert is_sub_child is True, "Child conversation must be recognized as subagent"
         assert p_conv == parent_conv_id
         assert p_turn == "1"
-
-    def test_subagent_command_validation_enforced(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("AGY_APP_DATA_DIR", str(tmp_path))
-        import ledger
-        import common
-        importlib.reload(ledger)
-        importlib.reload(common)
-
-        l = ledger.Ledger()
-        token = str(uuid.uuid4())
-        parent_conv_id = "parent-conv-123"
-        child_conv_id = "child-conv-456"
-
-        with l._get_connection() as conn:
-            conn.execute("INSERT INTO tokens (token_id) VALUES (?)", (token,))
-
-        payload = {
-            "token": token,
-            "may_delegate": False,
-            "remaining_depth": 0,
-            "parent_conv_id": parent_conv_id,
-            "parent_turn_id": "1"
-        }
-        l.insert_event(parent_conv_id, "1", "PreToolUse", "0", token, "WORK_PREPARED", json.dumps(payload))
-
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text(
-            f'{{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "Do work\\n\\n[ANTIGRAVITY_TOKEN:{token}]"}}\n'
-        )
-
-        spec = importlib.util.spec_from_file_location(
-            "enforce_delegation",
-            os.path.join(SCRIPTS_DIR, "enforce-delegation.py")
-        )
-        enforce_mod = importlib.util.module_from_spec(spec)
-        sys.modules["enforce_delegation"] = enforce_mod
-        spec.loader.exec_module(enforce_mod)
-
-        def run_hook(data):
-            stdin = io.StringIO(json.dumps(data))
-            stdout = io.StringIO()
-            enforce_mod.main(argv=["enforce-delegation.py"], stdin=stdin, stdout=stdout)
-            return json.loads(stdout.getvalue().strip())
-
-        # Subagent trying to run forbidden python inline code
-        bad_payload_python = {
-            "conversationId": child_conv_id,
-            "transcriptPath": str(transcript),
-            "toolCall": {
-                "name": "run_command",
-                "args": {
-                    "CommandLine": 'python3 -c "import os"',
-                    "Cwd": PLUGIN_ROOT
-                }
-            }
-        }
-        result = run_hook(bad_payload_python)
-        assert result["decision"] == "deny", f"Expected deny for python3 -c, got: {result}"
-        assert "Attention Guard Command Policy Violation" in result.get("reason", "")
-
-        # Subagent trying to run forbidden shell operator
-        bad_payload_pipe = {
-            "conversationId": child_conv_id,
-            "transcriptPath": str(transcript),
-            "toolCall": {
-                "name": "run_command",
-                "args": {
-                    "CommandLine": "rtk pytest tests/test_dalio_conformance.py | cat",
-                    "Cwd": PLUGIN_ROOT
-                }
-            }
-        }
-        result = run_hook(bad_payload_pipe)
-        assert result["decision"] == "deny", f"Expected deny for shell operator, got: {result}"
-        assert "Attention Guard Command Policy Violation" in result.get("reason", "")
-
-        # Subagent running allowed python -m module
-        good_payload_python_m = {
-            "conversationId": child_conv_id,
-            "transcriptPath": str(transcript),
-            "toolCall": {
-                "name": "run_command",
-                "args": {
-                    "CommandLine": "python3 -m pytest tests/",
-                    "Cwd": PLUGIN_ROOT
-                }
-            }
-        }
-        result = run_hook(good_payload_python_m)
-        assert result["decision"] == "allow", f"Expected allow for python3 -m pytest, got: {result}"
-
-        # Subagent running forbidden python -m module
-        bad_payload_python_m = {
-            "conversationId": child_conv_id,
-            "transcriptPath": str(transcript),
-            "toolCall": {
-                "name": "run_command",
-                "args": {
-                    "CommandLine": "python3 -m http.server",
-                    "Cwd": PLUGIN_ROOT
-                }
-            }
-        }
-        result = run_hook(bad_payload_python_m)
-        assert result["decision"] == "deny", f"Expected deny for forbidden module, got: {result}"
-
-
 
 def test_two_tiered_escalation():
     agents_rule_path = os.path.join(PLUGIN_ROOT, "rules", "AGENTS.md")

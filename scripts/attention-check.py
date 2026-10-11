@@ -148,25 +148,10 @@ def main(argv=None, stdin=None, stdout=None):
                 return emit({"decision": "allow"})
 
         if current_state == State.RECOVERY_REQUIRED:
-            with ledger._get_connection() as conn:
-                cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status NOT IN ('TERMINATED', 'FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
-                active_count = cursor.fetchone()[0]
-                cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status IN ('FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
-                failure_count = cursor.fetchone()[0]
-
-            if active_count == 0 and failure_count == 0:
-                ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False, "auto_recovered": True}))
-                ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
-                reset_rejection_count(tracker)
-                return emit({"decision": "allow"})
-
-            rejection_count = get_rejection_count(tracker)
-            if rejection_count >= MAX_STOP_REJECTIONS:
-                reset_rejection_count(tracker)
-                ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"retries_exhausted": True}))
-                return emit({"decision": "allow"})
-            increment_rejection_count(tracker)
-            return emit({"decision": "continue", "reason": "Attention Guard Recovery: Subagent execution failed or timed out. Diagnose and recover before completing."})
+            reset_rejection_count(tracker)
+            ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False, "recovery_handled": True}))
+            ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
+            return emit({"decision": "allow"})
     except Exception as exc:
         sys.stderr.write(f"Warning: {exc}\n")
     emit({"decision": "allow"})

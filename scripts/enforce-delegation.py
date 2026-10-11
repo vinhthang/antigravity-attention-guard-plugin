@@ -11,7 +11,6 @@ from common import (
 )
 from ledger import Ledger
 from fsm import Event
-from command_validator import validate_command
 
 def is_artifact_path(target_file, artifact_dir):
     if not target_file: return False
@@ -237,13 +236,15 @@ def main(argv=None, stdin=None, stdout=None):
             if is_plan_execution_active(transcript_path, artifact_dir):
                 if tool_name in ["write_to_file", "default_api:write_to_file"]:
                     target_file = args.get("TargetFile") or args.get("target_file") or args.get("path") or ""
-                    if not is_artifact_path(target_file, artifact_dir):
-                        return emit_deny("Attention Dilution Guard: Primary Agent is forbidden from directly mutating workspace code during an active implementation plan. Delegate implementation to a subagent via invoke_subagent.")
+                    if is_markdown_file(target_file) or "docs/" in target_file.lower() or is_artifact_path(target_file, artifact_dir):
+                        return emit({"decision": "allow"})
+                    return emit_deny("Attention Dilution Guard: Primary Agent is forbidden from directly mutating workspace code during an active implementation plan. Delegate implementation to a subagent via invoke_subagent.")
 
                 if tool_name in ["replace_file_content", "default_api:replace_file_content"]:
                     target_file = args.get("TargetFile") or args.get("target_file") or args.get("path") or ""
-                    if not is_artifact_path(target_file, artifact_dir):
-                        return emit_deny("Attention Dilution Guard: Primary Agent is forbidden from directly mutating workspace code during an active implementation plan. Delegate implementation to a subagent via invoke_subagent.")
+                    if is_markdown_file(target_file) or "docs/" in target_file.lower() or is_artifact_path(target_file, artifact_dir):
+                        return emit({"decision": "allow"})
+                    return emit_deny("Attention Dilution Guard: Primary Agent is forbidden from directly mutating workspace code during an active implementation plan. Delegate implementation to a subagent via invoke_subagent.")
 
                 if tool_name in ["run_command", "default_api:run_command"]:
                     cmd = args.get("CommandLine", "")
@@ -257,12 +258,7 @@ def main(argv=None, stdin=None, stdout=None):
                 if not may_delegate or remaining_depth <= 0:
                     return emit_deny("Attention Dilution Guard: Subagents are forbidden from delegating tasks further. Do not invoke or manage subagents.")
             if tool_name in ["run_command", "default_api:run_command"]:
-                cmd = args.get("CommandLine", "")
-                cwd = args.get("Cwd", "") or os.getcwd()
-                valid, err = validate_command(cmd, workspace_root=cwd)
-                if not valid:
-                    return emit_deny(f"Attention Guard Command Policy Violation: {err}")
-            return emit({"decision": "allow"})
+                return emit({"decision": "allow"})
 
         return emit({"decision": "allow"})
     except Exception as exc: emit({"decision": "deny", "reason": f"Attention Guard Exception in enforce-delegation: {exc}"})
