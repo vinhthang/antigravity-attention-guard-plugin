@@ -1,0 +1,58 @@
+{
+  "issues": [
+    {
+      "severity": "P1",
+      "description": "Criterion 8 (human approval) remains unmet. The header declares Status `ready-for-approval` and Section 6 records the 1.2.0 author/reviewer as `Primary Agent / WorkBuddy AI` (an AI, not a human). The footer gate explicitly states the package is 'currently at Status: ready-for-approval ... gated upon human review and explicit authorization'. No human signoff for this version/scope exists, so this is an unresolved residual of the previously flagged human-approval blocker (the status was merely renamed from `pending-human-signoff`). The spec is therefore not approved for implementation."
+    },
+    {
+      "severity": "P1",
+      "description": "TEST-AE-003 is internally inconsistent and not implementable as written. The fixture is a single 502-event batch (truncated to 500) sent with request-level header `User-Agent: AttentionGuard/dsh`, of which only 6 events are platform-described (2 codex, 2 dsh, 1 antigravity, 1 no-platform). Under REQ-AE-003's platform resolution, every event lacking an explicit `platform` resolves via the request User-Agent, so the ~494 undescribed events (and the 1 UA event) all resolve to `dsh`. The asserted outcomes \u2014 `platform=dsh` returns exactly 3, `platform=codex` returns 2, `platform=all` returns 6 \u2014 are therefore not derivable from the stated fixture (dsh would be ~497, and 'all' would be ~500, not 6). The AC also never states whether `all` includes `generic` events. This blocks a pass/fail determination."
+    },
+    {
+      "severity": "P1",
+      "description": "The authoritative REQ-AE-004 response schema example is numerically self-contradictory. `platform_breakdown` filtered values sum to 2,000,000+2,000,000+1,350,000 = 5,350,000, but the top-level `total_filtered_tokens` is 3,850,000; breakdown `saved` values sum to 0+6,000,000+4,070,000 = 10,070,000, but `tokens_saved` is 11,570,000. (Top-level `tokens_saved = 15,420,000 \u2212 3,850,000 = 11,570,000` and `savings_percentage = 75.03` are internally consistent, which makes the breakdown figures the outlier.) An implementer cannot determine whether the per-platform breakdown must reconcile to the totals, so the authoritative contract is ambiguous/incorrect."
+    },
+    {
+      "severity": "P1",
+      "description": "REQ-AE-003's authoritative `Top-Level Request Fields` list (event_type, platform, session_id, raw_tokens_est, filtered_tokens_est, payload) omits `created_at`, yet the rest of the spec depends on it: REQ-AE-006 orders the session trajectory by `created_at ASC`, REQ-AE-005's funnel requires `FILE_MODIFICATION`/`RECOVERY_VERIFIED` events that are *subsequent* to a trip, TEST-AE-004 explicitly requires events 'timestamped 48 hours ago', and the compound indexes are built on `created_at`. The field is present in design.md's `IngestRequest` (`CreatedAt`) and in the existing shipped clients (scripts/ledger.py:39, scripts/sync_metrics.py:83,179), but the authoritative ingest schema never defines how a client sets the event timestamp. This boundary-contract gap makes the timestamp-dependent ACs and the funnel ordering under-specified."
+    },
+    {
+      "severity": "P2",
+      "description": "TEST-AE-003 asserts `GET /api/metrics?session_id=sess-1` returns only events belonging to `sess-1`, but no event in the TEST-AE-003 fixture is ever assigned `session_id=sess-1`. The assertion has no corresponding ingested data, so it is untestable as written (TEST-AE-004 uses `sess-1` only for the funnel lifecycle)."
+    },
+    {
+      "severity": "P2",
+      "description": "`TEST_EXECUTION_RESULT` is defined as a typed payload in REQ-AE-003 (carrying `framework`, `error_class`, `error_signature`, `call_site`), but no requirement or In-Scope bullet mandates that any plugin emit it. In-Scope only mandates `TOOL_EXECUTION` (codex/dsh), plus `BREAKER_STATE_CHANGE`/`FILE_MODIFICATION`/`SESSION_STATE_CHANGE`. The event type is therefore orphaned, and REQ-AE-006's requirement to render 'error signatures' has no mandated event source (only `BREAKER_STATE_CHANGE` incidentally carries an error_signature)."
+    },
+    {
+      "severity": "P2",
+      "description": "The User-Agent platform fallback is inconsistently specified across artifacts. spec.md REQ-AE-003 matches the exact string `AttentionGuard/<platform>` (e.g. `AttentionGuard/codex`), while design.md (lower precedence) matches case-sensitive substrings 'Antigravity'/'Codex'/'DSH' (design.md:156-158) \u2014 which do not match the spec's lowercase values \u2014 and the actually shipped clients send `User-Agent: AttentionGuard/1.0` (scripts/ledger.py:29, scripts/sync_metrics.py:126). The spec mandates the new UA string but no AC pins down exact-match vs substring semantics, so the fallback behavior is implementer-defined. (Residual of a prior P2; largely mitigated because explicit platform emission is now mandated in-scope.)"
+    },
+    {
+      "severity": "P2",
+      "description": "REQ-AE-001's cargo extraction regex `error\\[(E\\d+)\\]:...` only matches coded errors. Cargo routinely emits uncoded diagnostics (`error: cannot find value ...`), which will fall through to the Generic Fallback and be labeled `framework=\"generic\"` rather than `\"cargo\"`. Since `framework` is a hash input, the same logical cargo failure can yield different signatures/labels depending on whether an error code is present, undermining cross-run identical-vs-divergent classification."
+    },
+    {
+      "severity": "P2",
+      "description": "The normalization rule 'Timestamps and execution durations (e.g. 12.34s, 45ms) MUST be removed' gives no pattern in the authoritative spec.md (only design.md:60-61 supplies `(?:d+(?:.d+)?(?:ms|s|m|\u00b5s|ns))` and an ISO-timestamp regex). Because `normalized_message` feeds the signature hash, this leaves a material canonicalization decision to the implementer and can produce divergent signatures for the same error across plugins."
+    },
+    {
+      "severity": "P2",
+      "description": "Response schemas are missing for two normative endpoints: REQ-AE-003 defines query parameters for `GET /api/metrics` but no response shape (TEST-AE-003 only counts rows), and REQ-AE-006's `GET /api/metrics/sessions/:session_id` specifies 'ordered array of events' without defining the event object fields. Additionally, the semantics of the `platform=all` value (whether `generic` events are included) is undefined, which is precisely what makes TEST-AE-003's '6 events' expectation ambiguous."
+    },
+    {
+      "severity": "P2",
+      "description": "Epistemic labeling is incomplete (criterion 3). There is no Current State / Assumptions section, and Section 1 states as fact that 'the circuit breaker currently relies on a scalar integer streak counter' for codex/dsh. No such streak-counter code is present or verifiable in this repository (the codex/dsh plugins are external; the local scripts/fsm.py uses an unrelated OPEN/HANDOFF_PENDING/... state set), so a present-state premise is asserted without evidence. Relatedly, Section 5's claim 'Blockers: None. All architectural constraints, typed schemas, and cross-harness contracts are fully specified and falsifiable' is overclaimed given the P1 inconsistencies above."
+    },
+    {
+      "severity": "P2",
+      "description": "The spec adds a batch ingest endpoint (up to 500 events) and several read endpoints but states no authentication/authorization requirement, even though the existing clients already send an `X-API-Key` header (scripts/ledger.py:32, scripts/sync_metrics.py:129). Whether the new endpoints must enforce that key, and whether any rate limiting applies to the batch path, is unspecified \u2014 a threat-analysis gap for a public ingest surface."
+    },
+    {
+      "severity": "P2",
+      "description": "Section 5 claims the progressive budget is reconciled with rules/EXECUTOR.md's 'up to 5 implementation attempts per test increment', but REQ-AE-001's identical-failure fast-trip halts at attempt 2 (`identical_failure_streak >= 2`). The relationship between this stricter identical-loop threshold and the executor's 5-attempt allowance is not reconciled or cited, so an implementer/executor cannot tell whether the 2-attempt halt is permitted under the governing executor rule."
+    }
+  ],
+  "session_id": "workbuddy:01a14392-2c1f-7466-b563-28649ef50dbd",
+  "engine": "workbuddy"
+}

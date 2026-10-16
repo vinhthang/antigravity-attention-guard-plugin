@@ -1,0 +1,102 @@
+{
+  "issues": [
+    {
+      "severity": "P1",
+      "description": "REQ-AE-001 states the circuit breaker 'across all plugins (antigravity, codex, dsh)' extracts error signatures and transitions to FAILURE_STAGE_2_TRIPPED. Only codex and dsh implement the FAILURE_STAGE vocabulary. The antigravity plugin's FSM is a lifecycle machine with an unrelated state set and no failure-streak concept, so the requirement silently presupposes a baseline that does not exist there. tasks.md (TASK-AE-002) reinforces the inversion by instructing 'Update AttentionGuardFSM ... with sig(N)==sig(N-1)' as if the streak logic already lived in antigravity."
+    },
+    {
+      "severity": "P1",
+      "description": "The normative signature `SHA256(error_type + error_message + call_site)[:12]` concatenates fields with no delimiter (collision-prone, e.g. type='ab',msg='c' vs type='a',msg='bc'), and never defines what error_type/error_message/call_site are or how they are normalized. Because the identical-vs-divergent classification depends entirely on canonicalization (ANSI stripping, address/timestamp removal, whitespace normalization), the material decision is left to the implementer. design.md uses different fields (`error_name + sanitized_message + call_site`) and the code snippet adds `test_target`/`error_class`, so cross-plugin signature comparability is undefined."
+    },
+    {
+      "severity": "P1",
+      "description": "The spec does not define: what counts as a 'consecutive' failure (only test/build commands? any command?); how the identical counter and the progressive counter interact (does a divergent failure reset the identical count? does a pass reset both?); what happens after the progressive budget is partially consumed then an identical failure recurs; and whether 'attempt 2' means the 2nd failure overall or the 2nd identical failure. TEST-AE-001 asserts 'trips on streak 2' while REQ-AE-001 says 'on attempt 2', leaving the exact boundary guessable."
+    },
+    {
+      "severity": "P1",
+      "description": "REQ-AE-001 mandates 'up to 4 consecutive attempts before tripping'. The authoritative executor rule grants 'a bounded budget of up to 5 implementation attempts per test increment to achieve GREEN'. The spec introduces a second, conflicting numeric budget without reconciling which governs or how the two compose."
+    },
+    {
+      "severity": "P1",
+      "description": "REQ-AE-002 requires tracking 'accumulated tokens' and crossing 'major capacity quartiles (25/50/75/90%)', but the spec never defines where token counts come from or what capacity (max_context_limit) the quartiles are relative to. The antigravity reminder hook is a PreInvocation hook whose payload carries only an invocation counter, so no token data is available at that boundary."
+    },
+    {
+      "severity": "P1",
+      "description": "The requirement mixes (a) tokens accumulated since the last reminder (>=40,000), (b) 'active session tokens' (<20,000 suppression), and (c) absolute context-capacity quartile crossings. TEST-AE-002 then measures 'total tokens' (5,000) and '42,000 tokens within 3 turns' and introduces a turn count. It is impossible to tell which measure each rule and test refer to, or whether the 10-turn clause is load-bearing."
+    },
+    {
+      "severity": "P1",
+      "description": "REQ-AE-003 requires platform defaulting by inspecting User-Agent values `AttentionGuard-Antigravity`, `AttentionGuard-Codex`, `AttentionGuard-DSH`. No client emits these: the Python plugins send `AttentionGuard/1.0` and the dsh plugin sends no User-Agent header at all; the server currently never reads User-Agent. As written, every existing event would fall through to `generic`, silently defeating the platform dimension the requirement exists to create."
+    },
+    {
+      "severity": "P1",
+      "description": "The requirement lists supported values as antigravity/codex/dsh but also mandates a `generic` fallback (a fourth value). It does not specify whether an invalid/unknown platform is rejected or coerced, nor does it define `session_id` (format, origin, uniqueness) or whether platform/session_id attach per-event or per-batch \u2014 the existing ingest accepts a JSON array of events, so the attachment point is a material decision."
+    },
+    {
+      "severity": "P1",
+      "description": "REQ-AE-004 requires plugins to report `raw_tokens_est` (uncompressed output bytes / 4) and `filtered_tokens_est` (bytes delivered to model / 4) 'upon shell execution'. The antigravity plugin has no shell-execution hook (only PreInvocation, PreToolUse, PostToolUse for invoke_subagent, and Stop), and RTK is a command rewriter that returns a rewritten command rather than measuring byte deltas. The spec does not define where output bytes are observed or how 'bytes delivered to model context' is determined."
+    },
+    {
+      "severity": "P1",
+      "description": "The requirement says cost reduction is 'based on configurable per-token rates' but defines neither the configuration mechanism/source, the default value, the currency, nor whether input/output/cached rates differ. The design hardcodes a single $2.50/1M input rate, directly contradicting 'configurable'."
+    },
+    {
+      "severity": "P1",
+      "description": "`rca_authored` requires counting sessions that author diagnosis.md or rca.md 'while tripped', but no ingest event carries file-authorship (codex records file_modifications locally without emitting a metric; antigravity emits none). `recovery_rate` excludes 'manual abandonment', which is undefined and unmeasurable. `total_trips` is defined as a count of FAILURE_STAGE_2_TRIPPED 'events', yet current telemetry encodes state inside a payload field (`state`) rather than as an event_type. The funnel therefore cannot be computed from the specified contract."
+    },
+    {
+      "severity": "P1",
+      "description": "REQ-AE-005 defines recovery_rate as 'percentage of tripped sessions that successfully recovered without manual abandonment'. TEST-AE-004 defines it as 'the ratio of RECOVERY_VERIFIED to FAILURE_STAGE_2_TRIPPED'. The numerator/denominator units differ (sessions vs events) and the exclusion clause is dropped, so the AC does not test the requirement."
+    },
+    {
+      "severity": "P1",
+      "description": "Every other pillar maps to at least one TEST-AE-xxx, but the whole frontend timeline requirement has no observable, falsifiable acceptance test. There is no AC covering the Sessions tab, the rendered trajectory elements, or their correctness."
+    },
+    {
+      "severity": "P1",
+      "description": "'The Vue 3 dashboard (`frontend/src/App.vue`) MUST provide ...' elevates a specific source-file location to a normative requirement. This is an internal implementation detail masquerading as a requirement; it constrains refactoring and is not an observable contract."
+    },
+    {
+      "severity": "P1",
+      "description": "The timeline must display user prompts/turn boundaries, tool latency and exit codes, error signatures and breaker transitions, and file modifications/verification marks. None of these fields are part of the defined ingest payload (event_type/payload only), and the spec never defines a trajectory schema, ordering key, or how latency/exit codes/verification marks are captured and transmitted."
+    },
+    {
+      "severity": "P1",
+      "description": "TEST-AE-003 requires that `GET /api/metrics?platform=dsh` filters results exclusively to DSH events, but REQ-AE-003 only specifies `POST /api/metrics` ingest and a database column. No requirement defines the GET list endpoint's platform query parameter, its response schema, or its filtering semantics."
+    },
+    {
+      "severity": "P1",
+      "description": "The document carries no Feature ID/Status/Created metadata, no record of human approval of this version and scope, and no section enumerating open questions or blockers. The INDEX lists it as 'planned', but the artifact itself contains no approval or blocker state, so it cannot be considered ready-to-implement."
+    },
+    {
+      "severity": "P1",
+      "description": "The Overview and requirements are written as flat assertions, mixing present-state facts ('Replace naive integer streak counters'), desired changes, and assumptions. At least one premise is false for the antigravity harness (no integer streak counter / FAILURE_STAGE breaker exists there), and no Current State / Assumptions section exists to separate verified facts from proposals."
+    },
+    {
+      "severity": "P1",
+      "description": "ACs use unfalsifiable phrasing: 'correctly stores distinct platform tags', 'accurately aggregates ... returning correct percentage savings', 'prompt refresh is immediately injected/suppressed'. No fixture payloads, expected numeric values, tolerances, or observable response shapes are given, so an engineer cannot determine pass/fail without guessing."
+    },
+    {
+      "severity": "P2",
+      "description": "The spec lists objectives but never states what is out of scope (e.g. whether backend-only, whether migration of historical events is in scope, whether other harnesses are excluded, whether the funnel covers non-TDD failures). Absence of explicit non-goals invites scope creep and mis-implementation."
+    },
+    {
+      "severity": "P2",
+      "description": "The repo's established spec format (docs/specs/dynamic-summary-length/spec.md) includes a metadata header and a Problem Statement before requirements. This artifact omits both, reducing traceability and motivation clarity."
+    },
+    {
+      "severity": "P2",
+      "description": "The supported platform values are listed as antigravity/codex/dsh while the same requirement mandates a `generic` fallback, so the enum is internally inconsistent. The requirement also only says 'indexed platform column' without specifying the index shape (single vs compound with created_at) that queries rely on."
+    },
+    {
+      "severity": "P2",
+      "description": "The spec hashes `error_type + error_message + call_site`; the design and its code snippet use `error_name`/`error_class`/`sanitized_message`/`test_target`. The same conceptual fields are named differently across artifacts, inviting divergent implementations."
+    },
+    {
+      "severity": "P2",
+      "description": "The Overview motivates the work via '$1M+ token sessions', but the operative thresholds are 40,000 tokens and percentage quartiles with no defined capacity baseline. The '1M+' claim is unverifiable and not connected to any measurable constraint."
+    }
+  ],
+  "session_id": "workbuddy:01a14381-cf4a-7f16-a649-843a79c9ecab",
+  "engine": "workbuddy"
+}

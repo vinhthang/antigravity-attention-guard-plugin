@@ -1,0 +1,42 @@
+{
+  "issues": [
+    {
+      "severity": "P1",
+      "description": "The authoritative payload contract is still incomplete, so the Recovery Funnel (REQ-AE-005) and Session Trajectory Timeline (REQ-AE-006) cannot be implemented without guessing. REQ-AE-003 defines each event as `event_type` + a free-form `payload: {}`, but never defines the payload field names the other requirements depend on: the funnel must detect a `BREAKER_STATE_CHANGE` whose new state is `FAILURE_STAGE_2_TRIPPED`/`RECOVERY_VERIFIED` and a `FILE_MODIFICATION` naming `diagnosis.md`/`rca.md`, and the timeline must render exit codes, error signatures, tool calls and recovery marks. Only design.md (lower precedence) hints at `payload->>'new_state'`. Because spec.md is authoritative and its `payload` is untyped, cross-artifact consistency is not guaranteed. (Residual of the previously flagged trajectory-schema blocker: the event vocabulary was added, the payload schema was not.) Section 5's claim 'Blockers: None ... fully specified and falsifiable' is therefore not substantiated."
+    },
+    {
+      "severity": "P1",
+      "description": "No human approval is recorded. The header still declares Status `pending-human-signoff` and there is no signoff/approval record for this version and scope, so review-standard criterion 8 (human approval) is unmet and the spec is not approved for implementation. (Residual of the previously flagged human-approval blocker; the Open Questions/Blockers section was added, but the version remains unapproved.)"
+    },
+    {
+      "severity": "P2",
+      "description": "REQ-AE-003's User-Agent fallback expects `AttentionGuard/antigravity|codex|dsh`, but no client emits that string \u2014 the shipped telemetry clients send `User-Agent: AttentionGuard/1.0` (scripts/ledger.py:29, scripts/sync_metrics.py:126) \u2014 and neither REQ-AE-003 nor the In-Scope section mandates that plugins send the new UA value. The fallback is therefore dead for any event that omits `platform`. design.md compounds this by matching on case-sensitive substrings 'Antigravity'/'Codex'/'DSH', which do not match the spec's lowercase `AttentionGuard/codex`. Either mandate the UA string or drop the fallback."
+    },
+    {
+      "severity": "P2",
+      "description": "`session_id` remains under-specified: only `VARCHAR(128) NOT NULL DEFAULT ''` is given; there is no format, origin, or uniqueness rule, yet REQ-AE-005 and REQ-AE-006 aggregate and order by it. (Residual of a previously flagged boundary-contract gap; batch-truncation behavior and compound-index shape were since specified.)"
+    },
+    {
+      "severity": "P2",
+      "description": "REQ-AE-002 mixes two distinct counters and defines only one. The volume trigger uses `tokens_since_refresh` (cumulative tokens since the last reminder), while the static-checkpoint suppression compares 'cumulative session tokens' (< 20,000), a quantity that is never defined as a variable or given a source. An implementer cannot determine whether the suppression compares total session tokens or `tokens_since_refresh`."
+    },
+    {
+      "severity": "P2",
+      "description": "The term 'payload' is overloaded. REQ-AE-003's platform resolution states 'If payload contains valid `platform`', while the same requirement's event schema defines a top-level `platform` field AND a nested `payload: {}` object. It is ambiguous whether platform is read from the top-level field or from inside `payload` (TEST-AE-003 implies top-level, but the requirement text implies otherwise)."
+    },
+    {
+      "severity": "P2",
+      "description": "The token-field contract is inconsistent and partially undefined across layers: the ingest schema uses `raw_tokens_est`/`filtered_tokens_est`, while the DB columns and Out-of-Scope defaults use `raw_tokens`/`filtered_tokens`, with the mapping stated only in design.md. Additionally, REQ-AE-004 has antigravity emit 'estimated prompt/result tokens on subagent invocation' but never maps input/output tokens to raw vs filtered, even though the token-savings response example attributes a 75% 'savings' to antigravity \u2014 a platform that performs no RTK compression \u2014 so the antigravity savings figure has no defined meaning."
+    },
+    {
+      "severity": "P2",
+      "description": "REQ-AE-003 makes batch truncation normative ('max 500 items; batches exceeding 500 MUST be truncated to the first 500 with response header `X-Truncated: true`'), but no TEST-AE exercises it; likewise the `session_id`/`event_type` filters and the `limit` cap on `GET /api/metrics` are not exercised. These normative boundaries therefore have no observable pass/fail criterion (criterion 2)."
+    },
+    {
+      "severity": "P2",
+      "description": "Section 5 cites the progressive-budget authority as `RULE[agent-delegation]`, but no such rule exists in the repo; the governing rule is `executor-subagent` (rules/EXECUTOR.md). The citation should be corrected for traceability."
+    }
+  ],
+  "session_id": "workbuddy:01a1438f-28bc-724e-9e1f-f385b4197fef",
+  "engine": "workbuddy"
+}

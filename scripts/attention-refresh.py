@@ -2,6 +2,7 @@
 import sys, os, json
 sys.path.insert(0, os.path.dirname(__file__))
 from common import is_subagent
+from ledger import Ledger
 
 PRIMARY_RULES_REMINDER = """⚡ Attention Guard Reminder (Turn Refresh):
 
@@ -12,6 +13,19 @@ Key Workflow Guidelines:
 - Execution Accountability: Subagents must return strict JSON schemas. Validate payloads using `rtk python3 scripts/payload_validator.py --role <role> --payload '<json>'`.
 
 Continue with your current task."""
+
+def _emit_reminder(stdout):
+    if os.environ.get("AGY_ATTENTION_GUARD_OBSERVATION_MODE") == "1":
+        stdout.write(json.dumps({}) + "\n")
+    else:
+        out = {
+            "injectSteps": [
+                {
+                    "ephemeralMessage": PRIMARY_RULES_REMINDER
+                }
+            ]
+        }
+        stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
 
 def main(argv=None, stdin=None, stdout=None):
     if stdin is None: stdin = sys.stdin
@@ -28,6 +42,12 @@ def main(argv=None, stdin=None, stdout=None):
 
         data = json.loads(raw_payload)
 
+        # Do not refresh inside subagents
+        is_sub, _, _, _, _ = is_subagent(data)
+        if is_sub:
+            stdout.write(json.dumps({}) + "\n")
+            return
+
         # Default: every 25 invocations
         raw_interval = os.environ.get("AGY_ATTENTION_GUARD_REFRESH_INTERVAL", "25")
         try:
@@ -42,29 +62,43 @@ def main(argv=None, stdin=None, stdout=None):
         except (ValueError, TypeError):
             invocation_num = 0
 
-        # Fast path: only trigger on positive multiples of interval
-        if invocation_num <= 0 or (invocation_num % interval != 0):
-            stdout.write(json.dumps({}) + "\n")
+        session_id = data.get("sessionId") or data.get("session_id") or data.get("conversationId") or "default"
+        ledger = Ledger()
+
+        transcript_path = data.get("transcriptPath", "")
+        total_tokens = 0
+        if transcript_path and os.path.exists(transcript_path):
+            try:
+                total_tokens = os.path.getsize(transcript_path) // 4
+            except Exception:
+                total_tokens = 0
+        if total_tokens == 0:
+            # Fallback to ledger session_stats
+            total_tokens, _ = ledger.get_session_token_stats(session_id)
+
+        last_refreshed = ledger.get_last_refreshed_tokens(session_id)
+        tokens_since_refresh = max(0, total_tokens - last_refreshed)
+
+        # Dynamic token volume trigger:
+        if tokens_since_refresh >= 40000:
+            ledger.record_refresh(session_id, total_tokens)
+            ledger.reset_refresh_counter(session_id)
+            _emit_reminder(stdout)
             return
 
-        # Do not refresh inside subagents
-        is_sub, _, _, _, _ = is_subagent(data)
-        if is_sub:
-            stdout.write(json.dumps({}) + "\n")
-            return
+        # Checkpoint trigger on invocation_num > 0 and (invocation_num % interval == 0):
+        if invocation_num > 0 and (invocation_num % interval == 0):
+            if total_tokens < 20000:
+                # Low token volume session: suppress static reminder
+                stdout.write(json.dumps({}) + "\n")
+                return
+            else:
+                ledger.record_refresh(session_id, total_tokens)
+                ledger.reset_refresh_counter(session_id)
+                _emit_reminder(stdout)
+                return
 
-        # Emit ephemeral reminder
-        out = {
-            "injectSteps": [
-                {
-                    "ephemeralMessage": PRIMARY_RULES_REMINDER
-                }
-            ]
-        }
-        if os.environ.get("AGY_ATTENTION_GUARD_OBSERVATION_MODE") == "1":
-            stdout.write(json.dumps({}) + "\n")
-        else:
-            stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
+        stdout.write(json.dumps({}) + "\n")
 
     except Exception as exc:
         sys.stderr.write(f"Warning: Exception in attention-refresh: {exc}\n")

@@ -1,0 +1,46 @@
+{
+  "issues": [
+    {
+      "severity": "P1",
+      "description": "REQ-AE-001 names the signature fields (framework|error_class|normalized_message|call_site) but never defines how they are extracted from raw command output, and TEST-AE-001's worked example is not derivable from the stated normalization rules. The fixture `FAILED tests/test_calc.py::test_add - AssertionError: expected 4 got 5 at line 12` must be split into error_class=`assertionerror` and normalized_message=`expected 4 got 5` (dropping `FAILED ... - `, `AssertionError:`, and `at line 12`) with call_site rewritten from `tests/test_calc.py::test_add` to `tests/test_calc.py:test_add`. None of these transformations (field splitting, dropping line numbers, `::`->`:`) appear in the normalization rules. Since identical-vs-divergent classification depends entirely on this canonicalization, the material decision remains implementer-defined and cross-plugin signature comparability is not guaranteed. (Residual of a previously flagged field-definition blocker; delimiters were added but extraction is still undefined.)"
+    },
+    {
+      "severity": "P1",
+      "description": "REQ-AE-006's frontend deliverables (platform filter dropdown, Token Economics card, Recovery Funnel card, Session Trajectory timeline) have no behavioral acceptance criteria; TEST-AE-005 only asserts that `npm run build` compiles with zero TypeScript/Vue errors. A clean build cannot verify that any required component exists, renders the correct data, or reacts to the platform filter, so the requirement is not falsifiably tested. (Residual of the previously flagged missing-frontend-AC blocker \u2014 a compilation check does not close it.)"
+    },
+    {
+      "severity": "P1",
+      "description": "The trajectory contract is incomplete: REQ-AE-006 requires rendering 'steps, tool executions, error signatures, breaker transitions, and recovery marks', but the ingest schema defines only `event_type` + free-form `payload`; only `BREAKER_STATE_CHANGE` and `FILE_MODIFICATION` are specified (REQ-AE-005). No event type or payload fields are defined for 'steps' or 'tool executions', so the timeline cannot be populated from the authoritative contract. (Residual of the previously flagged trajectory-schema blocker; the `created_at ASC` ordering key was added but the event vocabulary was not.)"
+    },
+    {
+      "severity": "P1",
+      "description": "The document records no human approval of this version and scope \u2014 Status remains `in-review` \u2014 and contains no Open Questions / Blockers section. Under the review standard's human-approval and unresolved-blocker criteria, the spec is not approved for implementation."
+    },
+    {
+      "severity": "P1",
+      "description": "REQ-AE-001 embeds the internal predicate `is_test_or_build_command(cmd)` as a normative contract, yet the authoritative spec never defines which commands qualify; the qualifying set (pytest, cargo test/build, npm test, vitest, jest, go test, mvn test) exists only in design.md. This is a premature internal implementation detail masquerading as a requirement, and it leaves 'what counts as a consecutive failure' implementation-defined. (Residual of the previously flagged boundary-ambiguity concern.)"
+    },
+    {
+      "severity": "P1",
+      "description": "Internal contradiction within the authoritative spec.md: In-Scope states 'Telemetry client emission of platform, session_id, raw_tokens_est, and filtered_tokens_est across all plugins', but REQ-AE-004 restricts raw/filtered token reporting to plugins executing shell commands (codex and dsh) \u2014 the antigravity plugin has no shell-execution hook (only PreInvocation/PreToolUse/PostToolUse/Stop). Both statements sit in spec.md at the same precedence, so an implementer cannot determine whether antigravity must emit token estimates."
+    },
+    {
+      "severity": "P2",
+      "description": "REQ-AE-003's User-Agent fallback requires `AttentionGuard-Antigravity` / `AttentionGuard-Codex` / `AttentionGuard-DSH`, but the actual Python telemetry client sends `User-Agent: AttentionGuard/1.0` (scripts/ledger.py:29, scripts/sync_metrics.py:126). The fallback is therefore dead for events that omit platform unless the spec also mandates the new UA string. The prior blocker is largely mitigated because explicit platform emission is now mandated in-scope, so this is advisory \u2014 the requirement should either mandate the UA value or drop the fallback."
+    },
+    {
+      "severity": "P2",
+      "description": "The identical/progressive counter interaction is only partially specified in spec.md: the Identical branch says to increment `identical_failure_streak` but says nothing about `progressive_failure_streak`, and the first-failure case (`last_error_signature` is None, so `sig(N-1)` is undefined) is not addressed. design.md fills these in, but spec.md is authoritative, so implementations may diverge at these boundaries."
+    },
+    {
+      "severity": "P2",
+      "description": "Several boundary contracts remain undefined: `session_id` has no stated format, origin, or uniqueness rule (only VARCHAR(128)); behavior for batches exceeding the stated 500-event cap is unspecified (reject/truncate/error); and the index is described only as an 'indexed platform column' although the query patterns require a compound `(platform, created_at)` index (defined only in design.md)."
+    },
+    {
+      "severity": "P2",
+      "description": "Untested / undefined response surfaces: `platform_breakdown` has no defined shape and no AC; the `range` parameter (24h/7d/30d) is not exercised by any AC; and `GET /api/metrics/sessions` (recent-sessions list) has no response schema and no acceptance test (TEST-AE-005 only covers `/sessions/:session_id`)."
+    }
+  ],
+  "session_id": "workbuddy:01a14389-ef64-7700-a26a-7b088dc4cba5",
+  "engine": "workbuddy"
+}
