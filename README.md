@@ -71,16 +71,17 @@ The plugin enforces subagent delegation, context protection, and structured data
   - If subagents performed work during a turn, verifies that a `walkthrough.md` artifact was generated or updated before closing.
   - **Human-Escalation Bypass**: Never blocks or traps the agent in retry loops when communicating with the user or reporting an issue.
 
-### 5. Multi-Tier Escalation Protocol
+### 5. Multi-Tier Escalation & Model Selection Protocol
 Aligned with [`rules/AGENTS.md`](rules/AGENTS.md):
 - **Primary Workhorse (`flash`)**: Fast, deterministic execution of approved implementation plans and rapid first-line root-cause diagnosis.
-- **High-Reasoning Fallback (`pro`)**: Unshackled for deep architectural investigations, intricate algorithmic roadblocks, or multi-file refactoring when `flash` hits a wall.
+- **High-Reasoning Fallback (`pro` / `inherit` Opus)**: Reserved for deep architectural investigations, intricate algorithmic roadblocks, and semantic specification traceability auditing (`traceability-auditor`, where `flash`/`flash_lite` is mechanically rejected).
 - **Tier 2 External Second-Opinion**: If diagnosis is ambiguous or fails twice (`escalation_counter >= 2`), requests secondary review (WorkBuddy AI) before amending the plan.
 - **Human Gate**: After 3 escalations (`escalation_counter >= 3`), autonomous looping terminates and escalates directly to the user.
 
 ### 6. State Machine & Work Item Ledger
 - **SQLite Ledger**: [`scripts/ledger.py`](scripts/ledger.py) maintains an auditable database of work items, tokens, and lifecycle events (`~/.gemini/antigravity/attention_guard.db`).
-- **Cryptographic Handoff**: [`scripts/inject-rules.py`](scripts/inject-rules.py) issues unique `[ANTIGRAVITY_TOKEN:<uuid>]` tokens and injects role-specific constraints into subagent prompts.
+- **Cryptographic Handoff**: [`scripts/inject-rules.py`](scripts/inject-rules.py) issues unique `[ANTIGRAVITY_TOKEN:<uuid>]` tokens, injects role-specific constraints into subagent prompts, and verifies tokens across both `SYSTEM_MESSAGE` (`step_index: 0`) and `USER_INPUT` transcript steps in [`scripts/common.py`](scripts/common.py).
+- **Script Argument Boundary Parsing**: [`scripts/enforce-delegation.py`](scripts/enforce-delegation.py) (`is_test_command`) and [`scripts/common.py`](scripts/common.py) (`is_build_command`) stop scanning `python`/`python3` tokens at the target `<script.py>` or `-m <module>` boundary so JSON payloads or CLI flags passed to helper scripts never trigger false-positive test/build blocks.
 - **Telemetry & Metrics**: Local diagnostics accessible via `rtk python3 scripts/diagnostics.py --metrics --json` and streamed to `attention-metrics-server`.
 
 ---
@@ -88,7 +89,7 @@ Aligned with [`rules/AGENTS.md`](rules/AGENTS.md):
 ## Modularity & Decoupled Ecosystem
 
 Attention Guard is designed to work alongside specialized companion plugins:
-- **`spec-driven-plugin`**: Owns the 5-Document Architecture standard (`docs/specs/`), specification verification (`spec_checker.py`), and pre-tool spec gating (`spec-gate.py`).
+- **`spec-driven-plugin`**: Owns the 5-Document Architecture standard (`docs/specs/`), structural & Opus semantic specification verification (`spec_checker.py`, `semantic_checker.py`), and pre-tool spec gating (`spec-gate.py`).
 - **`ai-review-plugin`**: Owns multi-model peer reviews, external second opinions, and review artifact synthesis (`review.md`).
 - **`antigravity-attention-guard-plugin`**: Owns execution delegation, context window protection, and subagent lifecycle tracking.
 
@@ -99,8 +100,8 @@ Attention Guard is designed to work alongside specialized companion plugins:
 | Hook | Matcher | Script | Responsibility |
 |---|---|---|---|
 | `PreInvocation` | - | [`scripts/attention-refresh.py`](scripts/attention-refresh.py) | Periodically injects ephemeral workflow reminders to keep rules salient in long pairing sessions. |
-| `PreToolUse` | `.*` | [`scripts/enforce-delegation.py`](scripts/enforce-delegation.py) | Unblocks markdown/spec editing; enforces code delegation and prevents subagent recursion. |
-| `PreToolUse` | `invoke_subagent` | [`scripts/inject-rules.py`](scripts/inject-rules.py) | Issues tokens and injects role rules, contracts, and model coercion into subagents. |
+| `PreToolUse` | `.*` | [`scripts/enforce-delegation.py`](scripts/enforce-delegation.py) | Unblocks markdown/spec editing and non-test helper scripts; enforces code/test delegation and prevents subagent recursion. |
+| `PreToolUse` | `invoke_subagent` | [`scripts/inject-rules.py`](scripts/inject-rules.py) | Issues tokens, injects role rules/contracts, coerces default executors to `flash`, and preserves `pro`/`inherit` for `traceability-auditor`. |
 | `PostToolUse` | `invoke_subagent` | [`scripts/record-tool-result.py`](scripts/record-tool-result.py) | Records dispatch outcome and updates state machine in SQLite ledger. |
 | `Stop` | - | [`scripts/attention-check.py`](scripts/attention-check.py) | Verifies walkthrough completion and ensures zero silent failures with human bypass. |
 

@@ -60,11 +60,30 @@ def is_build_command(cmd_str):
     if bin_name in {"pip", "pip3"}:
         return True
 
-    # python -m pip ...
+    # python -m pip ... or python setup.py ...
     if bin_name in {"python", "python3"}:
-        lower_tokens = [t.lower() for t in tokens[1:]]
-        if "pip" in lower_tokens:
-            return True
+        i = 1
+        while i < len(tokens):
+            arg = tokens[i]
+            if arg == "-m":
+                if i + 1 < len(tokens):
+                    return tokens[i + 1].lower() == "pip"
+                return False
+            if arg.startswith("-m") and len(arg) > 2:
+                return arg[2:].lower() == "pip"
+            if arg == "-c":
+                return False
+            if arg in {"-W", "-X", "--check-hash-based-pycs"}:
+                i += 2
+                continue
+            if arg.startswith("-"):
+                i += 1
+                continue
+            script_base = os.path.basename(arg).lower()
+            if script_base == "setup.py":
+                return any(t.lower() in {"build", "install", "bdist_wheel", "sdist", "develop"} for t in tokens[i + 1:])
+            return False
+        return False
 
     # Cargo
     if bin_name == "cargo":
@@ -143,7 +162,7 @@ def is_subagent(data):
                     continue
                 try:
                     step = json.loads(line_str)
-                    if step.get("type") == "USER_INPUT":
+                    if step.get("type") in ("USER_INPUT", "SYSTEM_MESSAGE"):
                         content = step.get("content", "")
                         for match in token_pattern.finditer(content):
                             tok = match.group(1)

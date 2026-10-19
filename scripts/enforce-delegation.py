@@ -60,19 +60,25 @@ def is_test_command(cmd_str):
         i = 1
         while i < len(tokens):
             arg = tokens[i]
-            if arg == "-m" and i + 1 < len(tokens):
-                mod = tokens[i + 1]
-                if mod in {"pytest", "unittest"}:
-                    return True
+            if arg == "-m":
+                if i + 1 < len(tokens):
+                    mod = tokens[i + 1].lower()
+                    return mod in {"pytest", "unittest"} or mod.startswith(("pytest.", "unittest."))
+                return False
+            if arg.startswith("-m") and len(arg) > 2:
+                mod = arg[2:].lower()
+                return mod in {"pytest", "unittest"} or mod.startswith(("pytest.", "unittest."))
+            if arg == "-c":
+                return False
+            if arg in {"-W", "-X", "--check-hash-based-pycs"}:
                 i += 2
                 continue
-            if arg.startswith("-m"):
-                mod = arg[2:]
-                if mod in {"pytest", "unittest"}:
-                    return True
-            if "pytest" in arg or "unittest" in arg:
-                return True
-            i += 1
+            if arg.startswith("-"):
+                i += 1
+                continue
+            # First non-option positional argument (<script>)
+            script_base = os.path.basename(arg).lower()
+            return script_base in {"pytest", "pytest.py", "unittest", "unittest.py"}
         return False
 
     # Package managers / build tools with 'test' subcommand

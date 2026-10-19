@@ -34,11 +34,21 @@ def main(argv=None, stdin=None, stdout=None):
             parent_is_thinking = is_thinking_model(get_primary_model(payload))
             ledger = Ledger()
             for sa in subagents:
-                if parent_is_thinking:
-                    model_val = sa.get("Model")
-                    if model_val in (None, "", "inherit"):
-                        sa["Model"] = "flash"
-                type_name = sa.get("TypeName", "")
+                type_name = str(sa.get("TypeName") or "").strip()
+                role_lower = str(sa.get("Role") or "").strip().lower()
+                is_traceability_auditor = (type_name.lower() == "traceability-auditor" or "traceability" in role_lower)
+                if is_traceability_auditor:
+                    model_val_lower = str(sa.get("Model") or "").strip().lower()
+                    if model_val_lower in ("flash", "flash_lite"):
+                        emit({"decision": "deny", "reason": "Attention Guard: Traceability auditor subagent must use Opus ('pro' or 'inherit'), never 'flash'."})
+                        return
+                    if sa.get("Model") in (None, ""):
+                        sa["Model"] = "pro"
+                else:
+                    if parent_is_thinking:
+                        model_val = sa.get("Model")
+                        if model_val in (None, "", "inherit"):
+                            sa["Model"] = "flash"
                 if is_sub:
                     child_may_delegate, child_depth = False, 0
                 else:
