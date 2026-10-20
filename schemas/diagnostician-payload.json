@@ -61,6 +61,37 @@
         "remediation_plan": {
           "type": "string",
           "minLength": 10
+        },
+        "edit_attributions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["component", "change", "observed_divergence", "verdict"],
+            "properties": {
+              "component": { "type": "string", "minLength": 1 },
+              "change": { "type": "string", "minLength": 5 },
+              "observed_divergence": { "type": "string", "minLength": 5 },
+              "verdict": {
+                "type": "string",
+                "enum": ["helped", "hurt", "no_observed_effect", "confounded"]
+              }
+            }
+          }
+        },
+        "transferable_lesson": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cue", "lesson", "evidence", "confidence"],
+          "properties": {
+            "cue": { "type": "string", "minLength": 10 },
+            "lesson": { "type": "string", "minLength": 10 },
+            "evidence": { "type": "string", "minLength": 10 },
+            "confidence": {
+              "type": "string",
+              "enum": ["high", "medium", "low"]
+            }
+          }
         }
       }
     }

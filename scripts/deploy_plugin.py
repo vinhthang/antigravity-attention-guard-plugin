@@ -11,6 +11,14 @@ import shutil
 import argparse
 from typing import Tuple, List
 
+try:
+    from surface_validator import validate_plugin_surface
+except ImportError:
+    cur_dir = os.path.dirname(__file__)
+    if cur_dir not in sys.path:
+        sys.path.insert(0, cur_dir)
+    from surface_validator import validate_plugin_surface
+
 CANONICAL_SOURCE = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
 INSTALLED_TARGET = os.path.realpath(os.path.expanduser("~/.gemini/config/plugins/attention-guard"))
 BUNDLE_ITEMS = ["plugin.json", "hooks.json", "rules", "schemas", "scripts", "skills"]
@@ -33,6 +41,10 @@ def verify_source_bundle(source_dir: str) -> Tuple[bool, List[str]]:
             entries = os.listdir(item_path)
             if not entries:
                 missing.append(f"{item} (empty directory)")
+
+    surf_ok, surf_errs, _ = validate_plugin_surface(source_dir)
+    if not surf_ok:
+        missing.extend(surf_errs)
 
     return len(missing) == 0, missing
 

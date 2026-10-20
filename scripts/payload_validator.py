@@ -26,6 +26,58 @@ def validate_uuid(val: Any) -> bool:
     except (ValueError, TypeError, AttributeError):
         return False
 
+def validate_causal_attribution(diag: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    has_attributions = "edit_attributions" in diag
+    has_lesson = "transferable_lesson" in diag
+
+    if has_attributions:
+        attributions = diag["edit_attributions"]
+        if not isinstance(attributions, list):
+            return False, "'edit_attributions' must be an array"
+        for idx, item in enumerate(attributions):
+            if not isinstance(item, dict):
+                return False, f"Item {idx} in 'edit_attributions' must be an object"
+            for req in ["component", "change", "observed_divergence", "verdict"]:
+                if req not in item:
+                    return False, f"Item {idx} in 'edit_attributions' missing required field: '{req}'"
+            if not isinstance(item["component"], str) or len(item["component"]) < 1:
+                return False, f"Item {idx} 'component' must be non-empty string"
+            if not isinstance(item["change"], str) or len(item["change"]) < 5:
+                return False, f"Item {idx} 'change' must be at least 5 chars"
+            if not isinstance(item["observed_divergence"], str) or len(item["observed_divergence"]) < 5:
+                return False, f"Item {idx} 'observed_divergence' must be at least 5 chars"
+            valid_verdicts = ("helped", "hurt", "no_observed_effect", "confounded")
+            if item["verdict"] not in valid_verdicts:
+                return False, f"Item {idx} 'verdict' must be one of {valid_verdicts}, got '{item['verdict']}'"
+
+    if has_lesson:
+        lesson = diag["transferable_lesson"]
+        if not isinstance(lesson, dict):
+            return False, "'transferable_lesson' must be an object"
+        for req in ["cue", "lesson", "evidence", "confidence"]:
+            if req not in lesson:
+                return False, f"'transferable_lesson' missing required field: '{req}'"
+        for fld in ["cue", "lesson", "evidence"]:
+            if not isinstance(lesson[fld], str) or len(lesson[fld]) < 10:
+                return False, f"'transferable_lesson' field '{fld}' must be at least 10 chars"
+        valid_conf = ("high", "medium", "low")
+        if lesson["confidence"] not in valid_conf:
+            return False, f"'transferable_lesson' 'confidence' must be one of {valid_conf}, got '{lesson['confidence']}'"
+
+    # Confounding Guard: If transferable_lesson and edit_attributions are both present
+    if has_lesson and has_attributions:
+        attributions = diag["edit_attributions"]
+        if not isinstance(attributions, list) or len(attributions) == 0:
+            return False, "Confounded edit attributions cannot support a transferable_lesson: at least one isolated 'helped' or 'hurt' verdict is required"
+        has_isolated = any(
+            isinstance(item, dict) and item.get("verdict") in ("helped", "hurt")
+            for item in attributions
+        )
+        if not has_isolated:
+            return False, "Confounded edit attributions cannot support a transferable_lesson: at least one isolated 'helped' or 'hurt' verdict is required"
+
+    return True, None
+
 def validate_payload_builtin(role: str, payload: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     if not isinstance(payload, dict):
         return False, "Payload must be a JSON object"
@@ -61,6 +113,9 @@ def validate_payload_builtin(role: str, payload: Dict[str, Any]) -> Tuple[bool, 
                 return False, "Inconclusive diagnosis requires 'competing_hypotheses'"
             if not isinstance(diag.get("evidence"), list) or len(diag["evidence"]) < 1:
                 return False, "Diagnosis requires at least one evidence item"
+            ok, err = validate_causal_attribution(diag)
+            if not ok:
+                return False, err
         return True, None
 
     elif role == "executor":
@@ -105,6 +160,12 @@ def validate_payload(role: str, payload: Dict[str, Any]) -> Tuple[bool, Optional
             validator = Draft7Validator(schema, format_checker=FormatChecker())
             errors = list(validator.iter_errors(payload))
             if not errors:
+                if role == "diagnostician" and payload.get("status") == "completed":
+                    diag = payload.get("diagnosis")
+                    if isinstance(diag, dict):
+                        ok, err = validate_causal_attribution(diag)
+                        if not ok:
+                            return False, err
                 return True, None
             first = errors[0]
             path = ".".join(str(p) for p in first.path) if first.path else "root"
@@ -243,6 +304,171 @@ def run_tests() -> bool:
     }
     ok, err = validate_payload("executor", large_summary_valid)
     assert ok, f"10000-char summary should be accepted, got error: {err}"
+
+    # Causal attribution & Confounding Guard tests
+    diag_with_helped = {
+        "execution_attempt_id": test_uuid,
+        "status": "completed",
+        "summary": "Root cause identified with causal attribution.",
+        "diagnosis": {
+            "root_cause_status": "determined",
+            "proximate_cause": "OperationalError: connection limit exceeded",
+            "root_cause": "Worker pool failed to release connection on timeout",
+            "evidence": [{
+                "evidence_kind": "source_location",
+                "source_file": "db/pool.py",
+                "line_number": 42,
+                "observation": "Missing connection.close() in finally block"
+            }],
+            "remediation_plan": "Add connection release in pool context manager",
+            "edit_attributions": [
+                {
+                    "component": "db/pool.py",
+                    "change": "Added try/finally connection release block",
+                    "observed_divergence": "Connection pool no longer saturates under 10 concurrent requests",
+                    "verdict": "helped"
+                }
+            ],
+            "transferable_lesson": {
+                "cue": "Whenever managing pooled socket connections",
+                "lesson": "Always release connections in guaranteed finally or context exit",
+                "evidence": "Observed zero leaked handles during stress test run",
+                "confidence": "high"
+            }
+        }
+    }
+    ok, err = validate_payload("diagnostician", diag_with_helped)
+    assert ok, f"Diagnostician with helped attribution + lesson rejected: {err}"
+
+    diag_with_hurt = {
+        "execution_attempt_id": test_uuid,
+        "status": "completed",
+        "summary": "Root cause identified with hurt attribution.",
+        "diagnosis": {
+            "root_cause_status": "determined",
+            "proximate_cause": "OperationalError: connection limit exceeded",
+            "root_cause": "Worker pool failed to release connection on timeout",
+            "evidence": [{
+                "evidence_kind": "source_location",
+                "source_file": "db/pool.py",
+                "line_number": 42,
+                "observation": "Missing connection.close() in finally block"
+            }],
+            "remediation_plan": "Add connection release in pool context manager",
+            "edit_attributions": [
+                {
+                    "component": "db/pool.py",
+                    "change": "Reduced pool size to 1 connection",
+                    "observed_divergence": "Deadlock immediately occurred on second request",
+                    "verdict": "hurt"
+                }
+            ],
+            "transferable_lesson": {
+                "cue": "Whenever sizing thread pools for recursive tasks",
+                "lesson": "Never reduce pool capacity below the minimum concurrency threshold",
+                "evidence": "Immediate deadlock reproduction when size was clamped",
+                "confidence": "high"
+            }
+        }
+    }
+    ok, err = validate_payload("diagnostician", diag_with_hurt)
+    assert ok, f"Diagnostician with hurt attribution + lesson rejected: {err}"
+
+    diag_confounded = {
+        "execution_attempt_id": test_uuid,
+        "status": "completed",
+        "summary": "Root cause identified with confounded edits.",
+        "diagnosis": {
+            "root_cause_status": "determined",
+            "proximate_cause": "OperationalError: connection limit exceeded",
+            "root_cause": "Worker pool failed to release connection on timeout",
+            "evidence": [{
+                "evidence_kind": "source_location",
+                "source_file": "db/pool.py",
+                "line_number": 42,
+                "observation": "Missing connection.close() in finally block"
+            }],
+            "remediation_plan": "Add connection release in pool context manager",
+            "edit_attributions": [
+                {
+                    "component": "db/pool.py",
+                    "change": "Simultaneous refactor of connection pool and lock manager",
+                    "observed_divergence": "Test passed but cannot isolate which edit helped",
+                    "verdict": "confounded"
+                },
+                {
+                    "component": "db/lock.py",
+                    "change": "Changed timeout from 5s to 10s",
+                    "observed_divergence": "No measurable difference in run latency",
+                    "verdict": "no_observed_effect"
+                }
+            ],
+            "transferable_lesson": {
+                "cue": "Whenever touching database pool and locking logic",
+                "lesson": "Refactoring both together may improve performance",
+                "evidence": "Tests passed after simultaneous modification",
+                "confidence": "medium"
+            }
+        }
+    }
+    ok, err = validate_payload("diagnostician", diag_confounded)
+    assert not ok, "Confounded edit attributions cannot support transferable_lesson and should be rejected"
+    assert "Confounded edit attributions cannot support a transferable_lesson" in (err or ""), f"Unexpected error message: {err}"
+
+    diag_empty_attribs = {
+        "execution_attempt_id": test_uuid,
+        "status": "completed",
+        "summary": "Root cause identified with empty edit attributions.",
+        "diagnosis": {
+            "root_cause_status": "determined",
+            "proximate_cause": "OperationalError: connection limit exceeded",
+            "root_cause": "Worker pool failed to release connection on timeout",
+            "evidence": [{
+                "evidence_kind": "source_location",
+                "source_file": "db/pool.py",
+                "line_number": 42,
+                "observation": "Missing connection.close() in finally block"
+            }],
+            "remediation_plan": "Add connection release in pool context manager",
+            "edit_attributions": [],
+            "transferable_lesson": {
+                "cue": "Whenever touching database pool and locking logic",
+                "lesson": "Refactoring both together may improve performance",
+                "evidence": "Tests passed after simultaneous modification",
+                "confidence": "medium"
+            }
+        }
+    }
+    ok, err = validate_payload("diagnostician", diag_empty_attribs)
+    assert not ok, "Empty edit_attributions with transferable_lesson should be rejected"
+
+    diag_confounded_alone = {
+        "execution_attempt_id": test_uuid,
+        "status": "completed",
+        "summary": "Root cause identified with confounded edits but no lesson.",
+        "diagnosis": {
+            "root_cause_status": "determined",
+            "proximate_cause": "OperationalError: connection limit exceeded",
+            "root_cause": "Worker pool failed to release connection on timeout",
+            "evidence": [{
+                "evidence_kind": "source_location",
+                "source_file": "db/pool.py",
+                "line_number": 42,
+                "observation": "Missing connection.close() in finally block"
+            }],
+            "remediation_plan": "Add connection release in pool context manager",
+            "edit_attributions": [
+                {
+                    "component": "db/pool.py",
+                    "change": "Simultaneous refactor of connection pool and lock manager",
+                    "observed_divergence": "Test passed but cannot isolate which edit helped",
+                    "verdict": "confounded"
+                }
+            ]
+        }
+    }
+    ok, err = validate_payload("diagnostician", diag_confounded_alone)
+    assert ok, f"Confounded attribution without transferable_lesson should be accepted: {err}"
 
     print("All payload_validator self-tests PASSED.")
     return True

@@ -7,6 +7,7 @@ Enforces subagent delegation and lifecycle governance to protect the Primary Age
 - **Attention Protection & Delegation**:
   - The Primary Agent focuses on strategic reasoning, architectural design, and workstream coordination.
   - Multi-step implementations, noisy builds, and repetitive test runs must be delegated to subagents to prevent context window bloat. Quick one-offs, single-file edits, configuration adjustments, and direct user prompts may proceed directly.
+  - **Subagent Input/Output Shape (`c5` Surface Rule)**: Delegate bounded sub-tasks whose input context is large and whose returned answer is small (compact structured JSON per `schemas/*-payload.json`). Do not spawn a subagent when the required output is as large as the input.
   - Multi-step implementation plans require explicit human approval ("Proceed") before execution subagents are dispatched.
 - **Thinking Mode Primary Agent Restrictions**:
   - When the Primary Agent operates under a thinking model (e.g., Opus, Gemini 4), it is strictly restricted to thinking, planning, and markdown documentation (`.md`, `.markdown`, or artifacts).
@@ -56,5 +57,6 @@ Enforces subagent delegation and lifecycle governance to protect the Primary Age
 ### 5. Subagent Termination Cleanup & Lifecycle Reuse
 - **Lifecycle Decoupling**: Task completion is decoupled from process lifecycle. When a subagent completes its work and returns a completed payload, it may remain idle in memory for follow-up reuse without blocking turns.
 - **Process Cleanup**: If the Primary Agent explicitly terminates a child subagent (e.g. on timeout or hung process), it must handle dependent subagents cleanly and avoid orphaned processes.
+- **Metrics & Telemetry**: When viewing or analyzing Attention Guard metrics and enforcement telemetry, consult skill `attention-metrics`.
 </instructions>
 </rule>

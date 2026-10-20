@@ -210,3 +210,34 @@ class Ledger:
                 (session_id, current_tokens, now)
             )
 
+    def audit_conversation_budget(self, conv_id: str) -> dict:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT payload FROM events WHERE event_id LIKE ? AND type = 'WORK_PREPARED' ORDER BY created_at ASC",
+                (f"{conv_id}_%",)
+            ).fetchall()
+            total_events_row = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE event_id LIKE ?",
+                (f"{conv_id}_%",)
+            ).fetchone()
+            total_events = total_events_row[0] if total_events_row else 0
+            tokens = []
+            for r in rows:
+                p_str = r[0] if r else None
+                if p_str:
+                    try:
+                        p_data = json.loads(p_str) if isinstance(p_str, str) else p_str
+                        t = p_data.get("token")
+                        if t:
+                            tokens.append(t)
+                    except Exception as exc:
+                        _ = exc
+            duplicate_tokens = sorted({t for t in tokens if t and tokens.count(t) > 1})
+            return {
+                "prepared_workers": len(tokens),
+                "unique_workers": len(set(tokens)),
+                "duplicate_tokens": duplicate_tokens,
+                "budget_ok": len(duplicate_tokens) == 0,
+                "total_events": total_events,
+            }
+

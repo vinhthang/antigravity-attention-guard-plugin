@@ -3,6 +3,7 @@ import sys, os, json, uuid, time
 sys.path.insert(0, os.path.dirname(__file__))
 from common import is_subagent, get_turn_state, get_primary_model, is_thinking_model
 from ledger import Ledger
+from context_boundary import EVIDENCE_BOUNDARY, materialize_context_pointer
 
 def main(argv=None, stdin=None, stdout=None):
     if argv is None: argv = sys.argv
@@ -65,9 +66,12 @@ def main(argv=None, stdin=None, stdout=None):
                 except Exception:
                     emit({"decision": "deny", "reason": "Attention Guard: Failed to issue cryptographic token to subagent cache."})
                     return
-                injected_text = coord_rules_text if child_may_delegate else exec_rules_text
-                injected = ("\n\n--- INJECTED RULES ---\n" + injected_text) if injected_text else ""
-                sa["Prompt"] = f"[ANTIGRAVITY_TOKEN:{token}]\n\n" + sa.get("Prompt", "") + injected
+                raw_prompt = sa.get("Prompt", "")
+                effective_prompt, _ = materialize_context_pointer(raw_prompt, token)
+                role_rules = coord_rules_text if child_may_delegate else exec_rules_text
+                injected_text = f"{role_rules}\n\n{EVIDENCE_BOUNDARY}" if role_rules else EVIDENCE_BOUNDARY
+                injected = f"\n\n--- INJECTED RULES ---\n{injected_text}"
+                sa["Prompt"] = f"[ANTIGRAVITY_TOKEN:{token}]\n\n{effective_prompt}{injected}"
             emit({"decision": "allow", "overwrite": {"Subagents": subagents}})
             return
         emit({"decision": "allow"})

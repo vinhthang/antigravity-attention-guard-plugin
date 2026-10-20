@@ -71,6 +71,7 @@ def main():
 
     fsm = FSM()
     workers = set()
+    worker_tokens = []
     max_depth = 0
     decisions = 0
     denied = 0
@@ -81,23 +82,31 @@ def main():
         except KeyError as exc: 
             if not args.json: sys.stderr.write(f"Warning: Unknown event {ev_type}: {exc}\n")
         if ev_type == "WORK_PREPARED":
-            workers.add(payload.get("token"))
+            tok = payload.get("token")
+            if tok:
+                workers.add(tok)
+                worker_tokens.append(tok)
             max_depth = max(max_depth, payload.get("remaining_depth", 0))
         if ev_type == "PRIMARY_TOOL_DENIED": denied += 1
         if "decision" in payload or ev_type == "STOP_REQUESTED": decisions += 1
+
+    duplicate_tokens = sorted({t for t in worker_tokens if t and worker_tokens.count(t) > 1})
+    budget_ok = len(duplicate_tokens) == 0
         
     res = {
         "state": fsm.state.name,
         "workers": len(workers),
         "depth": max_depth,
         "decisions_stops": decisions,
-        "denied_actions": denied
+        "denied_actions": denied,
+        "duplicate_tokens": duplicate_tokens,
+        "budget_ok": budget_ok
     }
     
     if args.json:
         print(json.dumps(res))
     else:
-        print(f"State: {fsm.state.name}\nWorkers: {len(workers)} prepared\nDepth: {max_depth}\nDecisions/Stops: {decisions}\nDenied Actions: {denied}")
+        print(f"State: {fsm.state.name}\nWorkers: {len(workers)} prepared\nDepth: {max_depth}\nDecisions/Stops: {decisions}\nDenied Actions: {denied}\nDuplicate Tokens: {duplicate_tokens}\nBudget OK: {budget_ok}")
 
 if __name__ == "__main__":
     main()
