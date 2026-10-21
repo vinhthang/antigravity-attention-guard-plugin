@@ -25,6 +25,13 @@
 - **`REQ-013` (Turn-Scoped Walkthrough Freshness Verification)**:
   - Updated `check_walkthrough_requirement(payload, conv_id, min_mtime=None)` in `scripts/attention-check.py` to verify `os.path.getmtime(target) >= (min_mtime - 5.0)` against the current turn's `MIN(created_at)` from `work_items`.
   - Verified by `tests/test_community_must_todos.py::TestWalkthroughFreshnessVerification` (`PASSED`).
+- **`REQ-014` (Antigravity 2.0 `Stop` `terminationReason` & `step_index: 0` Subagent Detection)**:
+  - Updated `scripts/attention-check.py` to recognize `"NO_TOOL_CALL"`, `"TERMINAL_STEP_TYPE"`, `"INJECTED_RESPONSE"`, `"MAX_INVOCATIONS"`, `"MAX_FORCED_INVOCATIONS"`, `"MAX_TOKEN_BUDGET_EXCEEDED"`, `"ERROR"`, and `"USER_CANCELED"`, and enforced the Walkthrough Gate in `State.REVIEWING` as well as `State.EXECUTION_ACTIVE`.
+  - Updated `scripts/common.py::is_subagent(data)` to recognize `step_index: 0` `SYSTEM_MESSAGE` steps with `sender=<parent_uuid>`.
+  - Verified by `tests/test_e2e_hook_pipeline.py` (`PASSED`) and live `attention_guard.db` recording `WORK_TERMINATED_OK` and `COMPLETED`.
+- **`REQ-015` (Cross-Plugin End-to-End Hook Pipeline Integration Test & Ecosystem Audit CLI)**:
+  - Implemented `scripts/system_audit.py` and `tests/test_e2e_hook_pipeline.py`.
+  - Verified by `rtk pytest tests/ -v` (`178 passed in 2.68s`) and `rtk python3 scripts/system_audit.py --repair-db --json` (`"valid": true, "errors": []`).
 
 ### Verbatim Test Execution Summary
 ```text

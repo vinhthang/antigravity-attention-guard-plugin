@@ -83,13 +83,20 @@ def main(argv=None, stdin=None, stdout=None):
             error = payload.get("error", None)
             event_type = None
 
+            OK_REASONS = {"model_stop", "NO_TOOL_CALL", "TERMINAL_STEP_TYPE", "INJECTED_RESPONSE"}
+            TIMEOUT_REASONS = {"max_steps_exceeded", "MAX_INVOCATIONS", "MAX_FORCED_INVOCATIONS", "MAX_TOKEN_BUDGET_EXCEEDED"}
+            ERROR_REASONS = {"ERROR", "USER_CANCELED"}
+
             if not fully_idle:
                 event_type = "WAITING"
                 with ledger._get_connection() as conn:
                     conn.execute("UPDATE work_items SET updated_at = ? WHERE work_id = (SELECT token_id FROM tokens WHERE claimed_by = ?)", (time.time(), conv_id))
-            elif error: event_type = Event.WORK_TERMINATED_ERROR.name
-            elif term_reason == "max_steps_exceeded": event_type = Event.WORK_TIMED_OUT.name
-            elif fully_idle and term_reason == "model_stop" and not error: event_type = Event.WORK_TERMINATED_OK.name
+            elif error or term_reason in ERROR_REASONS:
+                event_type = Event.WORK_TERMINATED_ERROR.name
+            elif term_reason in TIMEOUT_REASONS:
+                event_type = Event.WORK_TIMED_OUT.name
+            elif fully_idle and term_reason in OK_REASONS and not error:
+                event_type = Event.WORK_TERMINATED_OK.name
 
             if event_type and parent_conv_id and parent_turn_id is not None:
                 if event_type in (Event.WORK_TERMINATED_OK.name, Event.WORK_TERMINATED_ERROR.name, Event.WORK_TIMED_OUT.name):
@@ -109,7 +116,7 @@ def main(argv=None, stdin=None, stdout=None):
         tracker = os.path.join(get_cache_dir(), f"violation_{conv_id}_{turn_id}")
         current_state = get_current_fsm_state(ledger, conv_id, turn_id)
 
-        if current_state in (State.OPEN, State.REVIEWING, State.CLOSED):
+        if current_state in (State.OPEN, State.CLOSED):
             ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False}))
             ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
             reset_rejection_count(tracker)
@@ -119,7 +126,7 @@ def main(argv=None, stdin=None, stdout=None):
             reset_rejection_count(tracker)
             return emit({"decision": "allow"})
 
-        if current_state == State.EXECUTION_ACTIVE:
+        if current_state in (State.EXECUTION_ACTIVE, State.REVIEWING):
             with ledger._get_connection() as conn:
                 cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status NOT IN ('COMPLETED', 'TERMINATED', 'DONE', 'FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
                 active_count = cursor.fetchone()[0]
@@ -152,7 +159,8 @@ def main(argv=None, stdin=None, stdout=None):
                             "decision": "continue",
                             "reason": f"Attention Guard Walkthrough Gate: Subagents executed work, but walkthrough.md has not been generated or updated. Create or update walkthrough.md to document changes before completing the turn. (Retry {rejection_count}/{MAX_STOP_REJECTIONS})"
                         })
-                    ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.WORK_TERMINATED_OK.name, json.dumps({"all_work_terminal": True}))
+                    if current_state == State.EXECUTION_ACTIVE:
+                        ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.WORK_TERMINATED_OK.name, json.dumps({"all_work_terminal": True}))
                     ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False}))
                     ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
                     reset_rejection_count(tracker)
@@ -166,6 +174,9 @@ def main(argv=None, stdin=None, stdout=None):
                 reset_rejection_count(tracker)
                 return emit({"decision": "allow"})
             else:
+                if current_state == State.REVIEWING:
+                    ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False}))
+                    ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
                 reset_rejection_count(tracker)
                 return emit({"decision": "allow"})
 

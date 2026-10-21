@@ -191,6 +191,27 @@ def is_subagent(data):
                         ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "RUNNING")
                         return True, may_delegate, remaining_depth, parent_conv_id, parent_turn_id
 
+        if os.environ.get("AGY_DISABLE_SENDER_FALLBACK") != "1":
+            try:
+                with open(transcript_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line_str = line.strip()
+                        if not line_str:
+                            continue
+                        try:
+                            step = json.loads(line_str)
+                            if step.get("source") == "SYSTEM" and step.get("type") == "SYSTEM_MESSAGE":
+                                content = str(step.get("content") or "")
+                                m = re.search(r"\bsender=([0-9a-fA-F\-]{36})\b", content)
+                                if m:
+                                    parent_conv_id = m.group(1)
+                                    if parent_conv_id != conv_id:
+                                        return True, False, 0, parent_conv_id, "0"
+                            break
+                        except Exception:
+                            break
+            except Exception as exc:
+                sys.stderr.write(f"Warning in is_subagent sender fallback: {exc}\n")
 
     except Exception as exc:
         sys.stderr.write(f"Error in is_subagent: {exc}\n")

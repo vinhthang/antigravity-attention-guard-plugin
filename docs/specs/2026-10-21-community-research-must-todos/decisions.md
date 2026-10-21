@@ -14,3 +14,8 @@
 - **Status**: Accepted
 - **Context**: Based on Anthropic Context Engineering, NeurIPS *"The Complexity Trap"* (arXiv:2508.21433), and GitHub `mengram`, agents need explicit context-window fullness telemetry, pre-compaction state checkpoints on disk, rejection of raw terminal dumps in subagent summaries, and turn-scoped freshness checks on `walkthrough.md`.
 - **Decision**: Upgrade `attention-refresh.py`, `payload_validator.py`, and `attention-check.py` with zero external dependencies.
+
+## ADR-004: Antigravity 2.0 `Stop` `terminationReason` Alignment & End-to-End Subprocess Hook Auditing (`REQ-014`, `REQ-015`)
+- **Status**: Accepted
+- **Context**: Live SQLite database inspection (`~/.gemini/antigravity/attention_guard.db`) revealed `0` `COMPLETED` rows and `727` `TIMED_OUT` rows out of `741` `work_items` because `attention-check.py` checked `terminationReason == "model_stop"` instead of Antigravity 2.0's `"NO_TOOL_CALL"` (`docs/hooks.md`), which also prevented `active_count` from reaching `0` and silently bypassed the Walkthrough Gate in production. Isolated unit tests missed this because they mocked `"model_stop"`.
+- **Decision**: Support all Antigravity 2.0 `ExecutorTerminationReason` values in `attention-check.py`, add `step_index: 0` `sender=<uuid>` subagent detection in `common.py`, build `tests/test_e2e_hook_pipeline.py` to test the full multi-plugin hook pipeline end-to-end via real `hooks.json` matchers, and provide `scripts/system_audit.py` for continuous cross-plugin and SQLite ledger auditing.

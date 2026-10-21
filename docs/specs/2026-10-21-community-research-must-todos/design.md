@@ -38,8 +38,30 @@
   - Rejects `summary` if it contains $\ge 4$ Python traceback file lines (`File ".*", line \d+`) or `=== test session starts ===` when `len(summary) > 2000`.
   - Wired into both `validate_payload()` and `validate_payload_builtin()`.
 
-### 1.5 `scripts/attention-check.py` (`REQ-013`)
+### 1.5 `scripts/attention-check.py` (`REQ-013`, `REQ-014`)
 - Update `check_walkthrough_requirement(payload, conv_id, min_mtime: Optional[float] = None) -> bool`:
   - Checks `os.path.isfile(target) and os.path.getsize(target) > 0`.
   - If `min_mtime is not None`, also verifies `os.path.getmtime(target) >= (min_mtime - 5.0)`.
   - In `main()`, queries `SELECT MIN(created_at) FROM work_items WHERE parent_conv_id = ? AND parent_turn_id = ?` and passes `min_mtime` to `check_walkthrough_requirement`.
+- Update `Stop` `terminationReason` handling (`REQ-014`):
+  - `OK_REASONS = {"model_stop", "NO_TOOL_CALL", "TERMINAL_STEP_TYPE", "INJECTED_RESPONSE"}`
+  - `TIMEOUT_REASONS = {"max_steps_exceeded", "MAX_INVOCATIONS", "MAX_FORCED_INVOCATIONS", "MAX_TOKEN_BUDGET_EXCEEDED"}`
+  - `ERROR_REASONS = {"ERROR", "USER_CANCELED"}`
+  - If `error` or `term_reason in ERROR_REASONS`: `event_type = Event.WORK_TERMINATED_ERROR.name`
+  - Else if `term_reason in TIMEOUT_REASONS`: `event_type = Event.WORK_TIMED_OUT.name`
+  - Else if `fully_idle and term_reason in OK_REASONS and not error`: `event_type = Event.WORK_TERMINATED_OK.name`
+
+### 1.6 `scripts/common.py` (`REQ-014`)
+- In `is_subagent(data)`:
+  - After scanning `tokens` for `[ANTIGRAVITY_TOKEN:<uuid>]` against `WORK_PREPARED` in `Ledger`, if no token matched and `os.environ.get("AGY_DISABLE_SENDER_FALLBACK") != "1"`, inspect the first JSON line (`step_index == 0`) of `transcript_path`.
+  - If `first_step.get("source") == "SYSTEM"` and `first_step.get("type") == "SYSTEM_MESSAGE"`, search `content` for `r"\bsender=([0-9a-fA-F\-]{36})\b"`. If matched and `parent_conv_id != conv_id`, return `(True, False, 0, parent_conv_id, "0")`.
+
+### 1.7 `scripts/system_audit.py` & `tests/test_e2e_hook_pipeline.py` (`REQ-015`)
+- `scripts/system_audit.py`:
+  - `audit_ecosystem(plugins_root: Path, config_root: Path, db_path: Path, repair_db: bool = False) -> dict`:
+    - Checks all `hooks.json` files across `config_root` and `plugins_root/*` for valid matchers covering Antigravity 2.0 tools (`write_file`, `edit_file`, `read_file`, `invoke_subagent`) and existing target scripts.
+    - Checks all `agents/*.md` files for valid YAML frontmatter and Antigravity 2.0 tool names (`read_file`, `write_file`).
+    - Runs `validate_plugin_surface()` on every plugin under `plugins_root`.
+    - Audits `db_path` (`attention_guard.db`) for `work_items` status distribution and optionally cleans up stale `ACTIVE`/`TIMED_OUT` rows older than 1 hour when `--repair-db` is passed.
+- `tests/test_e2e_hook_pipeline.py`:
+  - Executes the end-to-end hook pipeline across `spec-gate.py`, `enforce-delegation.py`, `inject-rules.py`, `record-tool-result.py`, `attention-check.py`, `attention-refresh.py`, `json-gate.py`, and `ast-gate.py` using actual `hooks.json` matchers and Antigravity 2.0 payloads (`NO_TOOL_CALL`, `write_file`, `edit_file`, flat `invoke_subagent`).

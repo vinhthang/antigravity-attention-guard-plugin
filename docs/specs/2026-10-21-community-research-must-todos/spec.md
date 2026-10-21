@@ -52,3 +52,15 @@ A comprehensive survey of 2025–2026 agentic coding research and open-source co
 - **WHEN** `scripts/attention-check.py` verifies `walkthrough.md` on the `Stop` hook after subagents completed work in the current turn, **THE** hook **SHALL** verify both that `walkthrough.md` is non-empty and that its modification time (`os.path.getmtime`) is not older than the earliest `created_at` timestamp of the current turn's `work_items` (minus a 5-second clock tolerance).
 - **Acceptance Criteria**:
   - `check_walkthrough_requirement(payload, conv_id, min_mtime: Optional[float] = None) -> bool` rejects stale `walkthrough.md` files modified before the current turn's subagent execution started.
+
+### `REQ-014` — Antigravity 2.0 `Stop` `terminationReason` & `step_index: 0` Subagent Detection
+- **WHEN** `scripts/attention-check.py` evaluates a subagent `Stop` event, **THE** hook **SHALL** recognize Antigravity 2.0 `ExecutorTerminationReason` values (`"NO_TOOL_CALL"`, `"TERMINAL_STEP_TYPE"`, `"INJECTED_RESPONSE"`, `"model_stop"` as `WORK_TERMINATED_OK`; `"MAX_INVOCATIONS"`, `"MAX_FORCED_INVOCATIONS"`, `"MAX_TOKEN_BUDGET_EXCEEDED"`, `"max_steps_exceeded"` as `WORK_TIMED_OUT`; and `"ERROR"` or non-empty `error` as `WORK_TERMINATED_ERROR`), and **WHEN** `scripts/common.py::is_subagent(data)` evaluates a transcript where `step_index == 0` is a `SYSTEM_MESSAGE` containing `sender=<parent_uuid>`, **THE** helper **SHALL** identify the conversation as a subagent even if no token was injected.
+- **Acceptance Criteria**:
+  - `attention-check.py` transitions subagent `work_items` to `'COMPLETED'` and records `WORK_TERMINATED_OK` when `terminationReason == "NO_TOOL_CALL"` and `fullyIdle` is `True`.
+  - `common.py::is_subagent(data)` returns `(True, ...)` when `step_index == 0` has `type == "SYSTEM_MESSAGE"` and `sender=<parent_uuid>` with `parent_uuid != conv_id` (unless `AGY_DISABLE_SENDER_FALLBACK=1`).
+
+### `REQ-015` — Cross-Plugin End-to-End Hook Pipeline Integration Test & Ecosystem Audit CLI
+- **WHEN** the test suite or pre-deployment audit runs, **THE** repository **SHALL** include an end-to-end subprocess hook pipeline integration test (`tests/test_e2e_hook_pipeline.py`) that executes real `hooks.json` matchers and scripts across `PreInvocation`, `PreToolUse`, `PostToolUse`, and `Stop`, and **SHALL** provide `scripts/system_audit.py` to audit `hooks.json`, `agents/*.md`, `docs/specs/`, plugin surfaces, and SQLite `attention_guard.db` health across all installed plugins.
+- **Acceptance Criteria**:
+  - `tests/test_e2e_hook_pipeline.py` verifies the complete Primary Agent + Subagent lifecycle (`OPEN` -> `HANDOFF_PENDING` -> `EXECUTION_ACTIVE` -> `WORK_TERMINATED_OK` (`COMPLETED`) -> Walkthrough Gate -> `CLOSED`) using Antigravity 2.0 payloads (`NO_TOOL_CALL`, `edit_file`, `write_file`, flat `invoke_subagent`).
+  - `scripts/system_audit.py --json` audits all installed plugins and SQLite `attention_guard.db` (including `--repair-db` to clean up stale `TIMED_OUT`/`ACTIVE` orphan rows).

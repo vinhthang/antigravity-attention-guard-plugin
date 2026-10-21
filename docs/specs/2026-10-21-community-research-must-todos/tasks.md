@@ -17,3 +17,5 @@
 - [x] **Task 2.5**: Add unit tests in `tests/test_community_must_todos.py` for `build_refresh_reminder()` and `session_checkpoint.md` creation (`REQ-011`).
 - [x] **Task 2.6**: Add unit tests in `tests/test_community_must_todos.py` and `scripts/payload_validator.py` for `validate_no_raw_log_dump()` (`REQ-012`).
 - [x] **Task 2.7**: Add unit tests in `tests/test_community_must_todos.py` for turn-scoped `check_walkthrough_requirement()` (`REQ-013`).
+- [x] **Task 2.8**: Update `scripts/attention-check.py` (`NO_TOOL_CALL` / `MAX_INVOCATIONS` / `ERROR` `terminationReason` support and `State.REVIEWING` Walkthrough Gate enforcement) and `scripts/common.py` (`step_index: 0` `sender=<uuid>` subagent detection) (`REQ-014`).
+- [x] **Task 2.9**: Create `scripts/system_audit.py` and `tests/test_e2e_hook_pipeline.py` covering the full cross-plugin end-to-end hook lifecycle (`REQ-014`, `REQ-015`).

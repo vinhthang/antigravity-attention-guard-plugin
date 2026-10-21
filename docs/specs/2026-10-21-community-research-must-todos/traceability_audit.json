@@ -1,6 +1,6 @@
 {
-  "spec_hash": "fdfc8bcc38109680948a51b5f1316be3f1d50adc222c9aa3a795bb0efe58c741",
-  "evidence_hash": "1130c1dd0ca76b6203fba2a68379abceca39e843bcb6462e8d6d9657540140ee",
+  "spec_hash": "a93a4629809b06f3fd856555138d08c6aea593b8e15975285dc28dd1ca87387d",
+  "evidence_hash": "6956784835f2e795790a829acc6f2af83fba6ed3b686a62713028f74a286c6c5",
   "auditor_model": "claude-opus-4-6",
   "verdict": "PASS",
   "requirements_evaluated": {
@@ -66,6 +66,24 @@
       "decisions_consistent": true,
       "evidence_verified": true,
       "evidence_rationale": "Verified by automated pytest suite and verification.md for REQ-013."
+    },
+    "REQ-014": {
+      "design_aligned": true,
+      "design_rationale": "Section 1.5 and 1.6 specify Antigravity 2.0 Stop terminationReason values (NO_TOOL_CALL, MAX_INVOCATIONS, ERROR), State.REVIEWING Walkthrough Gate enforcement, and step_index=0 sender=<uuid> subagent detection.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 2.8 updates attention-check.py and common.py.",
+      "decisions_consistent": true,
+      "evidence_verified": true,
+      "evidence_rationale": "Verified by tests/test_e2e_hook_pipeline.py and 178/178 passing pytest suite."
+    },
+    "REQ-015": {
+      "design_aligned": true,
+      "design_rationale": "Section 1.7 defines scripts/system_audit.py and tests/test_e2e_hook_pipeline.py.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 2.9 implements system_audit.py and test_e2e_hook_pipeline.py.",
+      "decisions_consistent": true,
+      "evidence_verified": true,
+      "evidence_rationale": "Verified by system_audit.py --repair-db --json (valid=true, 0 errors) and test_e2e_hook_pipeline.py."
     }
   }
 }
