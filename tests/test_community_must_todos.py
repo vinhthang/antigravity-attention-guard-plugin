@@ -317,10 +317,8 @@ class TestAntigravity2ToolParity:
     """REQ-007: Antigravity 2.0 tool schema parity (write_file/edit_file with Path, flat invoke_subagent)."""
 
     def test_extract_target_file_parity(self):
-        extract_fn = getattr(enforce_mod, "_extract_target_file", None)
-        if extract_fn is None:
-            pytest.skip("REQ-007 _extract_target_file pending in parallel worker")
-
+        extract_fn = getattr(enforce_mod, "extract_target_file", getattr(enforce_mod, "_extract_target_file", None))
+        assert extract_fn is not None
         assert extract_fn({"Path": "/abs/file.py"}) == "/abs/file.py"
         assert extract_fn({"TargetFile": "/abs/legacy.py"}) == "/abs/legacy.py"
         assert extract_fn({"target_file": "/abs/snake.py"}) == "/abs/snake.py"
@@ -329,8 +327,7 @@ class TestAntigravity2ToolParity:
 
     def test_flat_invoke_subagent_extraction(self):
         extract_sa = getattr(inject_mod, "extract_subagents", None)
-        if extract_sa is None:
-            pytest.skip("REQ-007 extract_subagents pending")
+        assert extract_sa is not None
         # List format
         res_list = extract_sa({"Subagents": [{"Prompt": "do work", "Role": "Worker"}]})
         assert len(res_list) == 1
@@ -346,8 +343,7 @@ class TestTestTamperingGuard:
 
     def test_check_test_tampering(self):
         check_fn = getattr(enforce_mod, "check_test_tampering", None)
-        if check_fn is None:
-            pytest.skip("REQ-008 check_test_tampering pending in parallel worker")
+        assert check_fn is not None
 
         # Skip marker added to test file -> Denied
         args_skip = {"Path": "tests/test_feature.py", "Replacement": "def test_foo():\n    pytest.skip('bypassed')"}
@@ -368,14 +364,20 @@ class TestTestTamperingGuard:
         args_non_test = {"Path": "src/feature.py", "Replacement": "# pytest.skip comment in source"}
         assert check_fn("src/feature.py", args_non_test) is None
 
+    def test_test_tampering_env_var_override(self, monkeypatch):
+        monkeypatch.setenv("AGY_ALLOW_TEST_SKIP", "1")
+        check_fn = getattr(enforce_mod, "check_test_tampering", None)
+        assert check_fn is not None
+        args_skip = {"Path": "tests/test_feature.py", "Replacement": "def test_foo():\n    pytest.skip('bypassed')"}
+        assert check_fn("tests/test_feature.py", args_skip) is None
+
 
 class TestSubagentDoomLoopCircuitBreaker:
     """REQ-009: Subagent Doom-Loop Circuit Breaker."""
 
     def test_subagent_doom_loop_detection(self, tmp_path):
         check_fn = getattr(enforce_mod, "check_subagent_doom_loop", None)
-        if check_fn is None:
-            pytest.skip("REQ-009 check_subagent_doom_loop pending in parallel worker")
+        assert check_fn is not None
 
         db_path = str(tmp_path / "doom_loop.db")
         l = Ledger(db_path=db_path)
@@ -398,8 +400,7 @@ class TestDestructiveCommandGuard:
 
     def test_check_destructive_command(self):
         check_fn = getattr(enforce_mod, "check_destructive_command", None)
-        if check_fn is None:
-            pytest.skip("REQ-010 check_destructive_command pending in parallel worker")
+        assert check_fn is not None
 
         destructive = [
             "git reset --hard",
