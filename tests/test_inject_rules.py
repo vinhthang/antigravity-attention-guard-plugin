@@ -240,3 +240,29 @@ class TestThinkingModelSubagentCoercion:
         assert result["decision"] == "allow"
         subagents = result["overwrite"]["Subagents"]
         assert subagents[0]["Model"] == "flash"
+
+    def test_req007_flat_invoke_subagent_injection(self):
+        result = run_hook({
+            "conversationId": "parent-flat",
+            "toolCall": {
+                "name": "invoke_subagent",
+                "args": {
+                    "Prompt": "Implement feature",
+                    "Role": "Executor",
+                    "TypeName": "self",
+                }
+            }
+        })
+        assert result["decision"] == "allow"
+        assert "overwrite" in result
+        sa = result["overwrite"]
+        assert "[ANTIGRAVITY_TOKEN:" in sa["Prompt"]
+        assert "INJECTED RULES" in sa["Prompt"]
+        assert sa["Role"] == "Executor"
+
+    def test_req007_extract_subagents(self):
+        extract_fn = inject_mod.extract_subagents
+        assert extract_fn({}) == []
+        assert extract_fn({"Subagents": [{"Prompt": "A"}]}) == [{"Prompt": "A"}]
+        flat = {"Prompt": "B", "Role": "Worker"}
+        assert extract_fn(flat) == [flat]

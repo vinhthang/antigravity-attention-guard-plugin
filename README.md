@@ -90,6 +90,15 @@ Aligned with [`rules/AGENTS.md`](rules/AGENTS.md):
 - **Causal Edit Attribution & Confounding Guard ([`schemas/diagnostician-payload.json`](schemas/diagnostician-payload.json) & [`scripts/payload_validator.py`](scripts/payload_validator.py))**: Validates per-component `edit_attributions` (`helped | hurt | no_observed_effect | confounded`) and blocks `transferable_lesson` when edits are confounded.
 - **Worker Budget Audit ([`scripts/ledger.py`](scripts/ledger.py) & [`scripts/diagnostics.py`](scripts/diagnostics.py))**: `Ledger.audit_conversation_budget()` and `duplicate_tokens` / `budget_ok` telemetry.
 
+### 8. Community & Literature Hardening (`REQ-007`–`REQ-013`)
+- **Antigravity 2.0 Tool & Schema Parity (`REQ-007`)**: `enforce-delegation.py` and `inject-rules.py` support both legacy (`write_to_file`, `replace_file_content`, `Subagents`) and Antigravity 2.0 (`write_file`, `edit_file` with `Path`, and flat `invoke_subagent` dictionaries).
+- **Mechanical Test-Tampering Guard (`REQ-008`)**: Inspired by `hahahahahahahahah6/agent-guard`, `check_test_tampering()` blocks subagents from bypassing failing tests via `@pytest.mark.skip`, `@pytest.mark.xfail`, `@unittest.skip`, `pytest.skip(`, `it.skip(`, `describe.skip(`, `test.skip(`, `t.Skip(`, or `assert True`.
+- **Subagent Doom-Loop Circuit Breaker (`REQ-009`)**: Inspired by `claude-guard-hooks` and `r/ClaudeAI` `PreToolUse` circuit breakers, `check_subagent_doom_loop()` tracks `SUBAGENT_COMMAND` vs `SUBAGENT_FILE_EDIT` events in SQLite `Ledger` and halts subagents that execute the exact same command $\ge 3$ times consecutively without an intervening file edit.
+- **Mechanical Destructive Command Guard (`REQ-010`)**: Inspired by `dwarvesf/claude-guardrails`, `check_destructive_command()` mechanically blocks `git reset --hard`, `git clean -f`/`-fd`/`-fx`, `git checkout -- .`, `git restore .`, `git push --force` (while allowing `--force-with-lease`), and catastrophic `rm -rf` targets.
+- **Dynamic Context Budget Gauge & Pre-Compaction Checkpoint (`REQ-011`)**: Inspired by `r/ClaudeAI` `StatusLine`/`PreCompact` hooks and `alibaizhanov/mengram`, `attention-refresh.py` injects live token telemetry (`[Context Telemetry: ~<tokens> tokens (<pct>% of 128k budget) | Workers: <N>]`) and persists `<artifact_dir>/session_checkpoint.md` once context exceeds `80,000` tokens.
+- **Observation Masking / Raw Terminal Dump Guard (`REQ-012`)**: Grounded in NeurIPS 2025 *"The Complexity Trap: Simple Observation Masking"* (arXiv:2508.21433), `validate_no_raw_log_dump()` in `payload_validator.py` rejects subagent `summary` strings containing raw ANSI escape codes (`\x1b[`), $\ge 4$ raw traceback frames, or unformatted `pytest` session dumps (`> 2,000` chars).
+- **Turn-Scoped Walkthrough Freshness Verification (`REQ-013`)**: Inspired by `obra/superpowers` verification-before-completion, `check_walkthrough_requirement()` verifies `walkthrough.md` `mtime` against the current turn's `MIN(created_at)` in `work_items`.
+
 ---
 
 ## Modularity & Decoupled Ecosystem

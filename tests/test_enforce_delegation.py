@@ -47,7 +47,7 @@ class TestSubagentDetection:
             "modelName": "claude-opus-4.6",
             "toolCall": {
                 "name": "run_command",
-                "args": {"CommandLine": "rm -rf /"}
+                "args": {"CommandLine": "ls -la"}
             }
         })
         assert result["decision"] == "allow"

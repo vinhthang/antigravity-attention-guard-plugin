@@ -22,13 +22,23 @@ def reset_rejection_count(tracker):
     try: os.remove(count_file)
     except Exception as exc: sys.stderr.write(f"Warning: {exc}\n")
 
-def check_walkthrough_requirement(payload, conv_id):
+def check_walkthrough_requirement(payload, conv_id, min_mtime=None):
     artifact_dir = payload.get("artifactDirectoryPath", "")
     if not artifact_dir:
         base = os.environ.get("AGY_APP_DATA_DIR") or os.path.expanduser("~/.gemini/antigravity")
         artifact_dir = os.path.join(base, "brain", conv_id)
     target = os.path.join(artifact_dir, "walkthrough.md")
-    return os.path.isfile(target) and os.path.getsize(target) > 0
+    if not (os.path.isfile(target) and os.path.getsize(target) > 0):
+        return False
+    if min_mtime is not None:
+        try:
+            mtime = os.path.getmtime(target)
+            if mtime < (min_mtime - 5.0):
+                return False
+        except OSError as exc:
+            _ = exc
+            return False
+    return True
 
 def get_current_fsm_state(ledger, conv_id, turn_id):
     fsm = FSM()
@@ -121,7 +131,19 @@ def main(argv=None, stdin=None, stdout=None):
                     cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status IN ('FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
                     failure_count = cursor.fetchone()[0]
                 if failure_count == 0:
-                    if not check_walkthrough_requirement(payload, conv_id):
+                    min_mtime = None
+                    with ledger._get_connection() as conn:
+                        cursor = conn.execute(
+                            "SELECT MIN(created_at) FROM work_items WHERE parent_conv_id = ? AND parent_turn_id = ?",
+                            (conv_id, str(turn_id))
+                        )
+                        row = cursor.fetchone()
+                        if row and row[0] is not None:
+                            try:
+                                min_mtime = float(row[0])
+                            except (ValueError, TypeError) as conv_err:
+                                _ = conv_err
+                    if not check_walkthrough_requirement(payload, conv_id, min_mtime=min_mtime):
                         rejection_count = increment_rejection_count(tracker)
                         if rejection_count >= MAX_STOP_REJECTIONS:
                             reset_rejection_count(tracker)

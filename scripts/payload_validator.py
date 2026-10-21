@@ -9,6 +9,7 @@ import os
 import json
 import uuid
 import argparse
+import re
 from typing import Tuple, Optional, Dict, Any
 
 SCHEMAS_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "schemas"))
@@ -78,6 +79,23 @@ def validate_causal_attribution(diag: Dict[str, Any]) -> Tuple[bool, Optional[st
 
     return True, None
 
+def validate_no_raw_log_dump(summary: str) -> Tuple[bool, Optional[str]]:
+    """Reject raw ANSI escape codes or multi-line terminal/traceback dumps in summary (REQ-012)."""
+    if not isinstance(summary, str):
+        return True, None
+
+    if "\x1b[" in summary:
+        return False, "Raw terminal log dump forbidden in summary: ANSI escape sequence ('\\x1b[') detected"
+
+    tb_matches = re.findall(r'File\s+"[^"]+",\s+line\s+\d+', summary)
+    if len(tb_matches) >= 4:
+        return False, f"Raw terminal log dump forbidden in summary: {len(tb_matches)} traceback frames detected"
+
+    if len(summary) > 2000 and "=== test session starts ===" in summary:
+        return False, "Raw terminal log dump forbidden in summary: raw '=== test session starts ===' dump exceeding 2,000 characters"
+
+    return True, None
+
 def validate_payload_builtin(role: str, payload: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     if not isinstance(payload, dict):
         return False, "Payload must be a JSON object"
@@ -96,6 +114,10 @@ def validate_payload_builtin(role: str, payload: Dict[str, Any]) -> Tuple[bool, 
     summary = payload["summary"]
     if not isinstance(summary, str) or len(summary) < 10:
         return False, f"Invalid summary: must be string of at least 10 characters"
+    
+    ok_summary, err_summary = validate_no_raw_log_dump(summary)
+    if not ok_summary:
+        return False, err_summary
     
     if role == "diagnostician":
         if status == "completed":
@@ -160,6 +182,11 @@ def validate_payload(role: str, payload: Dict[str, Any]) -> Tuple[bool, Optional
             validator = Draft7Validator(schema, format_checker=FormatChecker())
             errors = list(validator.iter_errors(payload))
             if not errors:
+                summary = payload.get("summary")
+                if isinstance(summary, str) and summary:
+                    ok_summary, err_summary = validate_no_raw_log_dump(summary)
+                    if not ok_summary:
+                        return False, err_summary
                 if role == "diagnostician" and payload.get("status") == "completed":
                     diag = payload.get("diagnosis")
                     if isinstance(diag, dict):
@@ -469,6 +496,47 @@ def run_tests() -> bool:
     }
     ok, err = validate_payload("diagnostician", diag_confounded_alone)
     assert ok, f"Confounded attribution without transferable_lesson should be accepted: {err}"
+
+    # REQ-012 Observation Masking / Raw Terminal Dump Guard tests
+    payload_ansi = {
+        "execution_attempt_id": test_uuid,
+        "status": "completed",
+        "summary": "Completed task \x1b[31merror found in output\x1b[0m successfully.",
+        "files_modified": ["src/app.py"],
+        "test_results": {"passed": 1, "failed": 0, "total": 1, "command_executed": "pytest"}
+    }
+    ok, err = validate_payload("executor", payload_ansi)
+    assert not ok, "Payload with ANSI escape in summary must be rejected"
+    assert "ANSI escape sequence" in (err or "")
+
+    payload_tb = {
+        "execution_attempt_id": test_uuid,
+        "status": "completed",
+        "summary": (
+            'Diagnosed crash:\n'
+            '  File "a.py", line 10, in foo\n'
+            '  File "b.py", line 20, in bar\n'
+            '  File "c.py", line 30, in baz\n'
+            '  File "d.py", line 40, in qux\n'
+            'Traceback dumped directly.'
+        ),
+        "files_modified": ["src/app.py"],
+        "test_results": {"passed": 1, "failed": 0, "total": 1, "command_executed": "pytest"}
+    }
+    ok, err = validate_payload("executor", payload_tb)
+    assert not ok, "Payload with >= 4 traceback frames in summary must be rejected"
+    assert "traceback frames detected" in (err or "")
+
+    payload_pytest_dump = {
+        "execution_attempt_id": test_uuid,
+        "status": "completed",
+        "summary": "=== test session starts ===\n" + ("x" * 2500),
+        "files_modified": ["src/app.py"],
+        "test_results": {"passed": 1, "failed": 0, "total": 1, "command_executed": "pytest"}
+    }
+    ok, err = validate_payload("executor", payload_pytest_dump)
+    assert not ok, "Payload with pytest dump > 2000 chars must be rejected"
+    assert "=== test session starts ===" in (err or "")
 
     print("All payload_validator self-tests PASSED.")
     return True

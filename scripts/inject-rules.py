@@ -5,6 +5,16 @@ from common import is_subagent, get_turn_state, get_primary_model, is_thinking_m
 from ledger import Ledger
 from context_boundary import EVIDENCE_BOUNDARY, materialize_context_pointer
 
+def extract_subagents(args: dict) -> list:
+    """Extract list of subagent dicts from either Subagents list or flat invoke_subagent args."""
+    if not isinstance(args, dict):
+        return []
+    if "Subagents" in args and isinstance(args["Subagents"], list):
+        return args["Subagents"]
+    if "Prompt" in args or "TypeName" in args or "Role" in args:
+        return [args]
+    return []
+
 def main(argv=None, stdin=None, stdout=None):
     if argv is None: argv = sys.argv
     if stdin is None: stdin = sys.stdin
@@ -27,7 +37,11 @@ def main(argv=None, stdin=None, stdout=None):
         tool_call = payload.get("toolCall", {})
         if tool_call.get("name") in ["invoke_subagent", "default_api:invoke_subagent"]:
             args = tool_call.get("args", {})
-            subagents = args.get("Subagents", [])
+            is_flat = "Subagents" not in args and ("Prompt" in args or "TypeName" in args or "Role" in args)
+            subagents = extract_subagents(args)
+            if not subagents:
+                emit({"decision": "allow"})
+                return
             parent_conv_id = payload.get("conversationId", "unknown")
             step_idx = payload.get("stepIdx", 0)
             turn_id, _ = get_turn_state(payload.get("transcriptPath", ""))
@@ -72,7 +86,10 @@ def main(argv=None, stdin=None, stdout=None):
                 injected_text = f"{role_rules}\n\n{EVIDENCE_BOUNDARY}" if role_rules else EVIDENCE_BOUNDARY
                 injected = f"\n\n--- INJECTED RULES ---\n{injected_text}"
                 sa["Prompt"] = f"[ANTIGRAVITY_TOKEN:{token}]\n\n{effective_prompt}{injected}"
-            emit({"decision": "allow", "overwrite": {"Subagents": subagents}})
+            if is_flat:
+                emit({"decision": "allow", "overwrite": subagents[0]})
+            else:
+                emit({"decision": "allow", "overwrite": {"Subagents": subagents}})
             return
         emit({"decision": "allow"})
     except Exception as exc:
