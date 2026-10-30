@@ -73,7 +73,7 @@ def main(argv=None, stdin=None, stdout=None):
         sys.stderr.write(f"Warning: {exc}\n")
 
     try:
-        is_sub, _, _, parent_conv_id, parent_turn_id = is_subagent(payload)
+        is_sub, _, _, parent_conv_id, parent_turn_id = is_subagent(payload, ledger=ledger)
         conv_id = payload.get("conversationId", "unknown")
         turn_id, _ = get_turn_state(payload.get("transcriptPath", ""))
 
@@ -97,15 +97,25 @@ def main(argv=None, stdin=None, stdout=None):
                 event_type = Event.WORK_TIMED_OUT.name
             elif fully_idle and term_reason in OK_REASONS and not error:
                 event_type = Event.WORK_TERMINATED_OK.name
+            elif fully_idle:
+                if any(k in str(term_reason).lower() for k in ("error", "cancel", "kill", "abort")):
+                    event_type = Event.WORK_TERMINATED_ERROR.name
+                else:
+                    event_type = Event.WORK_TERMINATED_OK.name
 
             if event_type and parent_conv_id and parent_turn_id is not None:
                 if event_type in (Event.WORK_TERMINATED_OK.name, Event.WORK_TERMINATED_ERROR.name, Event.WORK_TIMED_OUT.name):
                     target_status = 'COMPLETED' if event_type == Event.WORK_TERMINATED_OK.name else ('FAILED' if event_type == Event.WORK_TERMINATED_ERROR.name else 'TIMED_OUT')
                     with ledger._get_connection() as conn:
-                        cursor = conn.execute("UPDATE work_items SET status = ? WHERE status = 'ACTIVE' AND work_id = (SELECT token_id FROM tokens WHERE claimed_by = ?)", (target_status, conv_id))
+                        cursor = conn.execute("UPDATE work_items SET status = ?, updated_at = ? WHERE status = 'ACTIVE' AND work_id = (SELECT token_id FROM tokens WHERE claimed_by = ?)", (target_status, time.time(), conv_id))
                         if cursor.rowcount == 0:
                             return emit({"decision": "allow"})
-                
+
+                try:
+                    ledger.reconcile_orphaned_work_items(parent_conv_id, str(parent_turn_id))
+                except Exception as exc:
+                    sys.stderr.write(f"Warning in reconcile_orphaned_work_items: {exc}\n")
+
                 with ledger._get_connection() as conn:
                     cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status NOT IN ('COMPLETED', 'TERMINATED', 'DONE', 'FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (parent_conv_id, str(parent_turn_id)))
                     all_work_terminal = (cursor.fetchone()[0] == 0)
@@ -127,6 +137,11 @@ def main(argv=None, stdin=None, stdout=None):
             return emit({"decision": "allow"})
 
         if current_state in (State.EXECUTION_ACTIVE, State.REVIEWING):
+            try:
+                ledger.reconcile_orphaned_work_items(conv_id, str(turn_id))
+            except Exception as exc:
+                sys.stderr.write(f"Warning in reconcile_orphaned_work_items: {exc}\n")
+
             with ledger._get_connection() as conn:
                 cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status NOT IN ('COMPLETED', 'TERMINATED', 'DONE', 'FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
                 active_count = cursor.fetchone()[0]

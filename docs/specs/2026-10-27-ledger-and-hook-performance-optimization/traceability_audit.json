@@ -1,0 +1,71 @@
+{
+  "spec_hash": "e8766bc7b23cfe2e894c004a09ad326408df8ff6e3eeb7e3cc2181805ea7273e",
+  "evidence_hash": "7401c1cfac67d36c673198460ac1d4c787f8bdd83cf4f10d2bb6f66c44490ce0",
+  "auditor_model": "claude-opus-4-6",
+  "verdict": "PASS",
+  "requirements_evaluated": {
+    "REQ-016": {
+      "design_aligned": true,
+      "design_rationale": "Section 2.1 specifies adding PRAGMA case_sensitive_like = ON to Ledger._get_connection() enabling B-tree range scans on sqlite_autoindex_events_1, and creating 5 secondary indexes (idx_events_type_created, idx_events_created_at, idx_work_items_parent, idx_work_items_status, idx_tokens_claimed_by) during schema initialization.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Tasks 1.1, 2.1, 3.1, and 3.3 define falsifiable TDD tests for EXPLAIN QUERY PLAN output, implementation in scripts/ledger.py, and verification via --repair-db and pytest.",
+      "decisions_consistent": true,
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 cites test_case_sensitive_like_and_indexes in tests/test_ledger_performance.py confirming PRAGMA case_sensitive_like = 1, B-tree index search on sqlite_autoindex_events_1, and creation of 5 secondary indexes, passing under rtk pytest (185 passed). Section 2 confirms all indexes active on live attention_guard.db."
+    },
+    "REQ-017": {
+      "design_aligned": true,
+      "design_rationale": "Section 2.1 defines Ledger.prune() with 24-hour transient and 7-day historical retention windows and throttled _prune_opportunistically() with 3600s interval, while Section 2.3 designs system_audit.py --repair-db cleanup and VACUUM compaction.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Tasks 1.2, 2.1, 2.3, 3.1, and 3.3 cover unit tests, implementation in scripts/ledger.py and scripts/system_audit.py, and live execution against attention_guard.db.",
+      "decisions_consistent": true,
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 cites test_ledger_prune_and_opportunistic_throttle in tests/test_ledger_performance.py passing under rtk pytest. Section 2 confirms live system_audit.py --repair-db execution pruned expired rows and compacted attention_guard.db from 15.5 MB to 1.91 MB via VACUUM."
+    },
+    "REQ-018": {
+      "design_aligned": true,
+      "design_rationale": "Section 2.1 specifies SCHEMA_VERSION = 2 and _INITIALIZED_DBS process cache in Ledger._init_db(), checking PRAGMA user_version >= 2 to bypass redundant DDL and ALTER TABLE statements.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Tasks 1.3, 2.1, and 3.3 establish explicit TDD assertions for zero executed DDL statements on re-instantiation, seamless v0/v1 migration, and test suite execution.",
+      "decisions_consistent": true,
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 cites test_init_db_user_version_gating in tests/test_ledger_performance.py verifying PRAGMA user_version = 2 and zero DDL/ALTER TABLE invocations on subsequent instantiations under rtk pytest (185 passed). Section 2 confirms live database stamped with user_version: 2."
+    },
+    "REQ-019": {
+      "design_aligned": true,
+      "design_rationale": "Section 2.2 details parse_transcript() in scripts/common.py with (abs_path, mtime_ns, size) cache keying, step extraction, and updates to hook scripts to share parsed transcript data and Ledger instances.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Tasks 1.4, 2.2, and 3.3 verify and implement single-pass parsing, mtime-based cache hits, and hook script refactoring.",
+      "decisions_consistent": true,
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 cites test_single_pass_parse_transcript_cache and test_parse_transcript_later_system_message_not_misclassified_as_subagent in tests/test_ledger_performance.py confirming single-pass parse_transcript() caching across get_turn_state(), is_subagent(), and is_plan_execution_active() passing under rtk pytest."
+    },
+    "REQ-020": {
+      "design_aligned": true,
+      "design_rationale": "Section 2.1 specifies environment variable guards (ATTENTION_METRICS_PUSH_ENABLED == '1' or non-empty ATTENTION_METRICS_API_KEY), AGY_DISABLE_METRICS_PUSH bypass, and capping atexit join to 0.05s.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Tasks 1.5, 2.1, and 3.3 test the default opt-out behavior, thread spawning prevention, and implementation in scripts/ledger.py.",
+      "decisions_consistent": true,
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 cites test_push_metric_async_opt_in in tests/test_ledger_performance.py confirming _push_metric_async() is skipped by default unless opt-in environment variables are set, passing under rtk pytest."
+    },
+    "REQ-021": {
+      "design_aligned": true,
+      "design_rationale": "Section 2.3 specifies the revised regex with negative lookbehind (?<![\\w.\\-~]), os.path.expanduser(), and targeted surface fixes for agent-translator documentation.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Tasks 1.6, 2.3, 3.1, and 3.3 provide falsifiable regex tests, script updates, surface file fixes, and end-to-end system_audit.py validation.",
+      "decisions_consistent": true,
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 cites test_validate_plugin_surface_home_relative_script_path and test_valid_plugin_surface_agent_translator in tests/test_surface_validator.py. Section 2 records verbatim output from system_audit.py --repair-db reporting Overall Valid: True, Total Errors: 0 across all 5 plugins."
+    },
+    "REQ-022": {
+      "design_aligned": true,
+      "design_rationale": "Section 2.4 details the architecture of src/guards.ts (destructive and tampering guards), src/circuit-breaker.ts (doom loop and token salience), src/rtk.ts (memoization caches), and Cordis hook interceptors in src/index.ts.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Tasks 3.2 and 3.3 provide explicit file targets and verification commands (pnpm test and pnpm run build) in dsh-attention-guard-plugin.",
+      "decisions_consistent": true,
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 3 cites vitest execution in dsh-attention-guard-plugin passing 62/62 tests across 4 test files (rtk.spec.ts, circuit-breaker.spec.ts, guards.spec.ts, plugin.spec.ts) along with tsc --noEmit and tsc build with 0 errors."
+    }
+  }
+}

@@ -297,38 +297,72 @@ def audit_sqlite_ledger(db_path: Path, repair: bool = False) -> Tuple[bool, List
             "counts_by_type": event_counts,
         }
 
-        if repair and "work_items" in tables:
-            # 1. Mark stale ACTIVE older than 3600s as TERMINATED
-            active_cutoff = now - 3600.0
-            cur_active = conn.execute(
-                "UPDATE work_items SET status = 'TERMINATED', updated_at = ? "
-                "WHERE status = 'ACTIVE' AND COALESCE(updated_at, created_at) < ?",
-                (now, active_cutoff),
-            )
-            repaired_active = cur_active.rowcount
+        if repair:
+            from ledger import Ledger
+            ledger = Ledger(str(p))
+            prune_stats = ledger.prune()
 
-            # 2. Delete TIMED_OUT older than 86400s
-            timeout_cutoff = now - 86400.0
-            cur_timeout = conn.execute(
-                "DELETE FROM work_items WHERE status = 'TIMED_OUT' AND COALESCE(updated_at, created_at) < ?",
-                (timeout_cutoff,),
-            )
-            deleted_timeout = cur_timeout.rowcount
+            repaired_active = 0
+            deleted_timeout = 0
+            if "work_items" in tables:
+                # 1. Mark stale ACTIVE older than 3600s as TERMINATED
+                active_cutoff = now - 3600.0
+                cur_active = conn.execute(
+                    "UPDATE work_items SET status = 'TERMINATED', updated_at = ? "
+                    "WHERE status = 'ACTIVE' AND COALESCE(updated_at, created_at) < ?",
+                    (now, active_cutoff),
+                )
+                repaired_active = cur_active.rowcount
+
+                # 2. Mark unclaimed orphaned PreToolUse work items (>300s old) as TERMINATED
+                cur_orphaned = conn.execute(
+                    "UPDATE work_items SET status = 'TERMINATED', updated_at = ? "
+                    "WHERE status = 'ACTIVE' AND parent_conv_id IS NOT NULL "
+                    "AND COALESCE(updated_at, created_at) < ? "
+                    "AND work_id IN ("
+                    "  SELECT w.work_id FROM work_items w "
+                    "  LEFT JOIN tokens t ON w.work_id = t.token_id "
+                    "  WHERE w.status = 'ACTIVE' AND COALESCE(t.claimed, 0) = 0 "
+                    "  AND EXISTS ("
+                    "    SELECT 1 FROM events ep "
+                    "    WHERE ep.type = 'WORK_PREPARED' AND ep.event_id LIKE '%' || w.work_id || '%'"
+                    "  ) "
+                    "  AND NOT EXISTS ("
+                    "    SELECT 1 FROM events eh "
+                    "    WHERE eh.event_id = w.parent_conv_id || '_' || w.parent_turn_id || '_PostToolUse_' || w.step_idx || '_invoke_HANDOFF_ACCEPTED'"
+                    "  )"
+                    ")",
+                    (now, now - 300.0),
+                )
+                repaired_active += cur_orphaned.rowcount
+
+                # 2. Delete TIMED_OUT older than 86400s
+                timeout_cutoff = now - 86400.0
+                cur_timeout = conn.execute(
+                    "DELETE FROM work_items WHERE status = 'TIMED_OUT' AND COALESCE(updated_at, created_at) < ?",
+                    (timeout_cutoff,),
+                )
+                deleted_timeout = cur_timeout.rowcount
 
             conn.commit()
+            conn.execute("VACUUM")
+
             stats["repair"] = {
                 "active_marked_terminated": repaired_active,
                 "stale_timed_out_deleted": deleted_timeout,
+                "prune": prune_stats,
+                **prune_stats,
             }
 
             # Refresh counts post-repair
-            repaired_counts = dict(
-                conn.execute("SELECT status, count(*) FROM work_items GROUP BY status").fetchall()
-            )
-            stats["work_items"]["counts_after_repair"] = repaired_counts
-            stats["work_items"]["total_after_repair"] = conn.execute(
-                "SELECT count(*) FROM work_items"
-            ).fetchone()[0]
+            if "work_items" in tables:
+                repaired_counts = dict(
+                    conn.execute("SELECT status, count(*) FROM work_items GROUP BY status").fetchall()
+                )
+                stats["work_items"]["counts_after_repair"] = repaired_counts
+                stats["work_items"]["total_after_repair"] = conn.execute(
+                    "SELECT count(*) FROM work_items"
+                ).fetchone()[0]
 
         conn.close()
     except Exception as exc:

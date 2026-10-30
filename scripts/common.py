@@ -124,96 +124,131 @@ def get_cache_dir():
     os.makedirs(cache, exist_ok=True)
     return cache
 
-def get_turn_state(transcript_path):
+_TRANSCRIPT_CACHE = {}
+
+def clear_transcript_cache():
+    _TRANSCRIPT_CACHE.clear()
+
+def parse_transcript(transcript_path: str) -> dict:
+    empty_result = {
+        "turn_id": 0,
+        "lines_count": 0,
+        "tokens": [],
+        "first_system_sender": None,
+        "steps": [],
+    }
+    if not transcript_path or not os.path.exists(transcript_path):
+        return empty_result
+
+    abs_p = os.path.abspath(transcript_path)
+    try:
+        st = os.stat(abs_p)
+        cache_entry = _TRANSCRIPT_CACHE.get(abs_p)
+        if cache_entry and cache_entry[0] == st.st_mtime_ns and cache_entry[1] == st.st_size:
+            return cache_entry[2]
+    except OSError:
+        return empty_result
+
     turn_id = 0
     lines_count = 0
-    if not transcript_path or not os.path.exists(transcript_path):
-        return turn_id, lines_count
-    try:
-        with open(transcript_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    lines_count += 1
-                    try:
-                        step = json.loads(line)
-                        if str(step.get("source", "")).startswith("USER") and step.get("type") == "USER_INPUT":
-                            turn_id = step.get("step_index", turn_id)
-                    except Exception as exc:
-                        sys.stderr.write(f"Warning: {exc}\n")
-    except Exception as exc:
-        sys.stderr.write(f"Warning: {exc}\n")
-    return turn_id, lines_count
+    tokens = []
+    first_system_sender = None
+    steps = []
+    token_pattern = re.compile(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]')
+    sender_pattern = re.compile(r'\bsender=([0-9a-fA-F\-]{36})\b')
 
-def is_subagent(data):
+    try:
+        with open(abs_p, "r", encoding="utf-8") as f:
+            for idx, raw_line in enumerate(f):
+                line_str = raw_line.strip()
+                if not line_str:
+                    continue
+                lines_count += 1
+                try:
+                    step = json.loads(line_str)
+                except Exception:
+                    step = {}
+                steps.append((idx, line_str, step))
+
+                source = str(step.get("source", ""))
+                stype = step.get("type", "")
+
+                if source.startswith("USER") and stype == "USER_INPUT":
+                    turn_id = step.get("step_index", turn_id)
+
+                if stype in ("USER_INPUT", "SYSTEM_MESSAGE"):
+                    content = str(step.get("content") or "")
+                    for match in token_pattern.finditer(content):
+                        tok = match.group(1)
+                        if tok not in tokens:
+                            tokens.append(tok)
+
+                if lines_count == 1 and source == "SYSTEM" and stype == "SYSTEM_MESSAGE":
+                    content = str(step.get("content") or "")
+                    m = sender_pattern.search(content)
+                    if m:
+                        first_system_sender = m.group(1)
+
+        result = {
+            "turn_id": turn_id,
+            "lines_count": lines_count,
+            "tokens": tokens,
+            "first_system_sender": first_system_sender,
+            "steps": steps,
+        }
+        _TRANSCRIPT_CACHE[abs_p] = (st.st_mtime_ns, st.st_size, result)
+        return result
+    except Exception as exc:
+        sys.stderr.write(f"Warning in parse_transcript: {exc}\n")
+        return empty_result
+
+def get_turn_state(transcript_path):
+    parsed = parse_transcript(transcript_path)
+    return parsed["turn_id"], parsed["lines_count"]
+
+def is_subagent(data, ledger=None):
     transcript_path = data.get("transcriptPath", "")
     if not transcript_path or not os.path.exists(transcript_path):
         return False, False, 0, None, None
 
     conv_id = data.get("conversationId", "unknown")
-    turn_id, _ = get_turn_state(transcript_path)
-    
+    parsed = parse_transcript(transcript_path)
+    turn_id = parsed["turn_id"]
+    tokens = parsed["tokens"]
+
     try:
-        tokens = []
-        token_pattern = re.compile(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]')
-        with open(transcript_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line_str = line.strip()
-                if not line_str:
-                    continue
-                try:
-                    step = json.loads(line_str)
-                    if step.get("type") in ("USER_INPUT", "SYSTEM_MESSAGE"):
-                        content = step.get("content", "")
-                        for match in token_pattern.finditer(content):
-                            tok = match.group(1)
-                            if tok not in tokens:
-                                tokens.append(tok)
-                except Exception:
-                    continue
+        if tokens:
+            if ledger is None:
+                ledger = Ledger()
+            for token in reversed(tokens):
+                with ledger._get_connection() as conn:
+                    cursor = conn.execute(
+                        "SELECT payload FROM events WHERE type = 'WORK_PREPARED' AND payload LIKE ?",
+                        (f'%"{token}"%',),
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        payload_data = json.loads(row[0])
+                        may_delegate = payload_data.get("may_delegate", False)
+                        remaining_depth = payload_data.get("remaining_depth", 0)
+                        parent_conv_id = payload_data.get("parent_conv_id", "unknown")
+                        parent_turn_id = payload_data.get("parent_turn_id", "unknown")
 
-        ledger = Ledger()
-        for token in reversed(tokens):
-            with ledger._get_connection() as conn:
-                cursor = conn.execute("SELECT payload FROM events WHERE type = 'WORK_PREPARED' AND payload LIKE ?", (f'%"{token}"%',))
-                row = cursor.fetchone()
-                if row:
-                    payload_data = json.loads(row[0])
-                    may_delegate = payload_data.get("may_delegate", False)
-                    remaining_depth = payload_data.get("remaining_depth", 0)
-                    parent_conv_id = payload_data.get("parent_conv_id", "unknown")
-                    parent_turn_id = payload_data.get("parent_turn_id", "unknown")
+                        if conv_id == parent_conv_id:
+                            continue
 
-                    if conv_id == parent_conv_id:
-                        continue
-
-                    if ledger.claim_token(token, conv_id):
-                        ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "WORK_CLAIMED")
-                        ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "RUNNING")
-                        return True, may_delegate, remaining_depth, parent_conv_id, parent_turn_id
+                        if ledger.claim_token(token, conv_id):
+                            ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "WORK_CLAIMED")
+                            ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "RUNNING")
+                            return True, may_delegate, remaining_depth, parent_conv_id, parent_turn_id
 
         if os.environ.get("AGY_DISABLE_SENDER_FALLBACK") != "1":
-            try:
-                with open(transcript_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line_str = line.strip()
-                        if not line_str:
-                            continue
-                        try:
-                            step = json.loads(line_str)
-                            if step.get("source") == "SYSTEM" and step.get("type") == "SYSTEM_MESSAGE":
-                                content = str(step.get("content") or "")
-                                m = re.search(r"\bsender=([0-9a-fA-F\-]{36})\b", content)
-                                if m:
-                                    parent_conv_id = m.group(1)
-                                    if parent_conv_id != conv_id:
-                                        return True, False, 0, parent_conv_id, "0"
-                            break
-                        except Exception:
-                            break
-            except Exception as exc:
-                sys.stderr.write(f"Warning in is_subagent sender fallback: {exc}\n")
+            parent_conv_id = parsed.get("first_system_sender")
+            if parent_conv_id and parent_conv_id != conv_id:
+                return True, False, 0, parent_conv_id, "0"
 
     except Exception as exc:
         sys.stderr.write(f"Error in is_subagent: {exc}\n")
 
     return False, False, 0, None, None
+

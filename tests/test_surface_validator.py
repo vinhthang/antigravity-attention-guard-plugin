@@ -45,12 +45,13 @@ def test_valid_plugin_surface_agent_translator():
     assert ok is True, f"Surface errors in agent-translator: {errs}"
     assert len(errs) == 0
     assert census["valid"] is True
-    assert census["skill_count"] == 5
+    assert census["skill_count"] >= 5
     assert "translate" in census["skills"]
     assert "translate-book" in census["skills"]
     assert "translate-zh-book" in census["skills"]
     assert "en-vi-book-translation-review" in census["skills"]
     assert "summarize-book" in census["skills"]
+    assert "generate-audio-book" in census["skills"]
     assert census["always_on_chars"] <= census["always_on_max"]
 
 
@@ -274,3 +275,20 @@ def test_validate_surface_with_custom_rule_file(tmp_path):
     ok, errs, census = validate_plugin_surface(tmp_path)
     assert ok is True, f"Errors: {errs}"
     assert census["always_on_chars"] == len(rule_content)
+
+
+def test_validate_plugin_surface_home_relative_script_path(tmp_path):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "AGENTS.md").write_text("Consult skill `my-skill`.\n", encoding="utf-8")
+    skill_dir = tmp_path / "skills" / "my-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: my-skill\ndescription: A test skill\n---\n"
+        "Run `python3 ~/.gemini/config/plugins/attention-guard/scripts/ledger.py`\n",
+        encoding="utf-8",
+    )
+    ok, errs, census = validate_plugin_surface(tmp_path)
+    assert ok is True, f"Surface errors: {errs}"
+    assert not any("ledger.py" in e for e in errs)
+

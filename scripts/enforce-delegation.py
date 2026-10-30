@@ -9,6 +9,7 @@ from common import (
     is_thinking_model,
     is_markdown_file,
     is_build_command,
+    parse_transcript,
 )
 from ledger import Ledger
 from fsm import Event
@@ -57,9 +58,30 @@ def is_test_file(target_file: str) -> bool:
         return True
     if (base.startswith("test_") and base.endswith(".py")) or base.endswith("_test.py"):
         return True
-    if base.endswith(".test.ts") or base.endswith(".spec.ts") or base.endswith("_test.go"):
+    if base.endswith((
+        ".test.ts", ".spec.ts", ".test.tsx", ".spec.tsx",
+        ".test.js", ".spec.js", ".test.jsx", ".spec.jsx",
+        ".test.mjs", ".spec.mjs", ".test.cjs", ".spec.cjs",
+        "_test.go"
+    )):
         return True
     return False
+
+def _strip_quotes_and_comments(line: str, lang_ext: str) -> str:
+    # 1. Replace strings with placeholders
+    if lang_ext == "ts":
+        line = re.sub(r'`(?:\\.|[^`\\])*`', '""', line)
+    line = re.sub(r'"(?:\\.|[^"\\])*"', '""', line)
+    line = re.sub(r"'(?:\\.|[^'\\])*'", "''", line)
+
+    # 2. Strip comments
+    if lang_ext == "py":
+        line = re.sub(r'#.*$', '', line)
+    elif lang_ext in ("ts", "go"):
+        line = re.sub(r'//.*$', '', line)
+        line = re.sub(r'/\*.*?\*/', '', line)
+
+    return line
 
 def check_test_tampering(target_file: str, args: dict) -> Optional[str]:
     if os.environ.get("AGY_ALLOW_TEST_SKIP") == "1":
@@ -81,21 +103,70 @@ def check_test_tampering(target_file: str, args: dict) -> Optional[str]:
     if "ReplacementChunks" in args and isinstance(args.get("ReplacementChunks"), list):
         for chunk in args.get("ReplacementChunks", []):
             if isinstance(chunk, dict):
-                target += " " + str(chunk.get("Target") or chunk.get("TargetContent") or "")
-                replacement += " " + str(chunk.get("Replacement") or chunk.get("ReplacementContent") or "")
+                target += "\n" + str(chunk.get("Target") or chunk.get("TargetContent") or "")
+                replacement += "\n" + str(chunk.get("Replacement") or chunk.get("ReplacementContent") or "")
 
-    for pattern in TEST_TAMPER_PATTERNS:
-        if pattern in replacement and pattern not in target:
-            return (
-                f"Attention Guard: Test tampering detected. Introducing test-skipping marker or bypass "
-                f"'{pattern}' in test file '{target_file}' is forbidden."
-            )
+    lower_target = target_file.lower()
+    if lower_target.endswith(".py"):
+        lang_ext = "py"
+        patterns = [
+            "@pytest.mark.skip",
+            "@pytest.mark.xfail",
+            "@unittest.skip",
+            "pytest.skip(",
+            "pytest.xfail(",
+            "assert True",
+        ]
+    elif any(lower_target.endswith(e) for e in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")):
+        lang_ext = "ts"
+        patterns = [
+            "it.skip(",
+            "describe.skip(",
+            "test.skip(",
+        ]
+    elif lower_target.endswith(".go"):
+        lang_ext = "go"
+        patterns = [
+            "t.Skip(",
+        ]
+    else:
+        lang_ext = "other"
+        patterns = TEST_TAMPER_PATTERNS
+
+    target_lines = set(target.splitlines())
+    clean_replacement = replacement
+    if lang_ext == "py":
+        clean_replacement = re.sub(r'"""[\s\S]*?"""', '""', clean_replacement)
+        clean_replacement = re.sub(r"'''[\s\S]*?'''", "''", clean_replacement)
+    elif lang_ext == "ts":
+        clean_replacement = re.sub(r'`[\s\S]*?`', '""', clean_replacement)
+        clean_replacement = re.sub(r'/\*[\s\S]*?\*/', '', clean_replacement)
+
+    for line in clean_replacement.splitlines():
+        if line in target_lines:
+            continue
+        clean_line = _strip_quotes_and_comments(line, lang_ext)
+        for pattern in patterns:
+            matched = False
+            if pattern == "assert True":
+                if re.search(r"\bassert\s+True\b", clean_line):
+                    matched = True
+            else:
+                if pattern in clean_line:
+                    matched = True
+            if matched:
+                return (
+                    f"Attention Guard: Test tampering detected. Introducing test-skipping marker or bypass "
+                    f"'{pattern}' in test file '{target_file}' is forbidden."
+                )
     return None
 
 def check_destructive_command(cmd_str: str) -> Optional[str]:
     if not cmd_str or not isinstance(cmd_str, str):
         return None
-    sub_cmds = re.split(r"[;&|]+", cmd_str)
+    # REQ-026: Normalize POSIX backslash-newline line continuations before splitting
+    clean_cmd = re.sub(r"\\\r?\n", " ", cmd_str)
+    sub_cmds = re.split(r"[;&|]+", clean_cmd)
     for sub in sub_cmds:
         s = sub.strip()
         if not s:
@@ -145,8 +216,12 @@ def check_destructive_command(cmd_str: str) -> Optional[str]:
                 catastrophic = {"/", "~", "$HOME", "${HOME}", ".", "..", ".git", "./.git", "/.git"}
                 for tgt in targets:
                     norm = tgt.rstrip("/").strip()
-                    if norm in catastrophic or tgt in catastrophic or norm == "":
+                    if norm in catastrophic or tgt in catastrophic:
                         return f"Attention Guard: Sweeping destructive command '{cmd_str}' is forbidden (catastrophic rm targeting '{tgt}')."
+                    if norm == "":
+                        # Only reject if the original command explicitly passed an empty quoted argument ("" or '')
+                        if tgt == "" and any(q in s for q in ('""', "''")):
+                            return f"Attention Guard: Sweeping destructive command '{cmd_str}' is forbidden (catastrophic rm targeting '{tgt}')."
     return None
 
 def record_subagent_file_edit(conv_id: str, target_file: str = "", ledger: Optional[Ledger] = None):
@@ -162,6 +237,74 @@ def record_subagent_file_edit(conv_id: str, target_file: str = "", ledger: Optio
             )
     except Exception as exc:
         sys.stderr.write(f"Warning in record_subagent_file_edit: {exc}\n")
+
+def normalize_command_signature(cmd: str) -> str:
+    if not cmd or not isinstance(cmd, str):
+        return ""
+    c = cmd.strip()
+    # Strip leading rtk / sudo prefixes
+    while True:
+        prev = c
+        c = re.sub(r"^(?:rtk\s+proxy\s+|rtk\s+|sudo\s+)", "", c).strip()
+        if c == prev:
+            break
+
+    # Strip sleep chained before command (e.g. sleep 2 && ...)
+    c = re.sub(r"^(?:rtk\s+)?sleep\s+\d+\s*&&\s*", "", c).strip()
+
+    # Re-strip rtk / sudo if sleep was preceding
+    while True:
+        prev = c
+        c = re.sub(r"^(?:rtk\s+proxy\s+|rtk\s+|sudo\s+)", "", c).strip()
+        if c == prev:
+            break
+
+    # 1. Process-Polling Signature (POLL_PROC:<target>)
+    # Check pgrep: e.g. pgrep -P 59170 -l, pgrep -fl -P 59170, pgrep my_proc
+    if c.startswith("pgrep") or re.search(r"\bpgrep\b", c):
+        m_pid = re.search(r"-[pP]\s*(\d+)", c)
+        if m_pid:
+            return f"POLL_PROC:{m_pid.group(1)}"
+        m_target = re.search(r"\bpgrep\b(?:\s+-[a-zA-Z0-9]+)*\s+([^\s|&;]+)", c)
+        if m_target:
+            target = m_target.group(1).strip()
+            if target:
+                return f"POLL_PROC:{target}"
+
+    # Check ps: e.g. ps -p 59170 -o pid,comm or ps -ef | grep 59170
+    if c.startswith("ps ") or c == "ps" or re.search(r"\bps\b", c):
+        m_grep = re.search(r"\|\s*(?:rtk\s+)?grep\b(?:\s+-[a-zA-Z0-9]+)*\s+['\"]?([^'\"\s|&;]+)", c)
+        if m_grep:
+            grep_target = m_grep.group(1).strip()
+            if grep_target:
+                return f"POLL_PROC:{grep_target}"
+        m_pid = re.search(r"-[pP]\s*(\d+)", c)
+        if m_pid:
+            return f"POLL_PROC:{m_pid.group(1)}"
+
+    # 2. File-Polling Signature (POLL_FILE:<path>)
+    # Check tail, head, wc: e.g. tail -n 25 /tmp/a.log, wc -l /tmp/a.log
+    m_cmd = re.match(r"^(?:tail|head|wc)\b", c)
+    if m_cmd:
+        try:
+            tokens = shlex.split(c)
+        except Exception:
+            tokens = c.split()
+        file_candidates = [t for t in tokens[1:] if not t.startswith("-") and not t.isdigit()]
+        if file_candidates:
+            file_path = file_candidates[-1]
+            return f"POLL_FILE:{os.path.normpath(file_path)}"
+
+    # Check python -c reading a file
+    if re.search(r"\bpython[0-9.]*\s+-c\b", c):
+        is_write = any(w in c for w in ('"w"', "'w'", '"a"', "'a'", '"w+"', "'w+'", 'write_text', 'write_bytes'))
+        if not is_write and any(r in c for r in ('readlines', 'read_text', 'read(', 'readline')):
+            m_open = re.search(r"(?:open|Path)\s*\(\s*['\"]([^'\"]+)['\"]", c)
+            if m_open:
+                file_path = m_open.group(1).strip()
+                return f"POLL_FILE:{os.path.normpath(file_path)}"
+
+    return c
 
 def check_subagent_doom_loop(*args, **kwargs) -> Optional[str]:
     """Check for subagent doom loop on consecutive identical run_command executions."""
@@ -213,6 +356,7 @@ def check_subagent_doom_loop(*args, **kwargs) -> Optional[str]:
             ).fetchall()
 
         identical_count = 0
+        cmd_sig = normalize_command_signature(cmd_norm)
         for row in rows:
             etype = row["type"]
             if etype == "SUBAGENT_FILE_EDIT":
@@ -224,7 +368,7 @@ def check_subagent_doom_loop(*args, **kwargs) -> Optional[str]:
                     recorded_cmd = pdata.get("command", "") if isinstance(pdata, dict) else str(pdata)
                 except Exception:
                     recorded_cmd = str(payload_str)
-                if recorded_cmd.strip() == cmd_norm:
+                if normalize_command_signature(recorded_cmd) == cmd_sig:
                     identical_count += 1
                 else:
                     break
@@ -232,7 +376,8 @@ def check_subagent_doom_loop(*args, **kwargs) -> Optional[str]:
         if identical_count >= (threshold - 1):
             return (
                 f"Attention Guard: Subagent doom-loop circuit breaker. "
-                f"Command '{cmd_norm}' executed {identical_count + 1} times consecutively without intervening file edits."
+                f"Command '{cmd_norm}' executed {identical_count + 1} times consecutively without intervening file edits. "
+                f"Do not poll processes or logs in a shell loop; return your current status or await async completion."
             )
 
         now = time.time()
@@ -367,47 +512,38 @@ def is_plan_execution_active(transcript_path, artifact_dir=None):
         seen_implementation_plan = False
         has_plan_file = bool(artifact_dir and os.path.exists(os.path.join(artifact_dir, "implementation_plan.md")))
 
-        with open(transcript_path, "r", encoding="utf-8") as f:
-            for idx, raw_line in enumerate(f):
-                line = raw_line.strip()
-                if not line:
+        parsed = parse_transcript(transcript_path)
+        for idx, line, step in parsed.get("steps", []):
+            source = step.get("source", "")
+            step_type = step.get("type", "")
+            content = str(step.get("content", ""))
+            content_lower = content.lower()
+
+            # Update seen_implementation_plan tracking linearly (no quadratic concatenation)
+            if not seen_implementation_plan:
+                if "implementation_plan" in content_lower or "implementation_plan" in line.lower():
+                    seen_implementation_plan = True
+
+            # Check for plan approval ONLY from user explicit input
+            if source == "USER_EXPLICIT" and step_type == "USER_INPUT":
+                # Strip system-injected metadata (e.g. <ADDITIONAL_METADATA> which contains /plan definition)
+                clean_content = re.sub(r"<ADDITIONAL_METADATA>.*?</ADDITIONAL_METADATA>", "", content, flags=re.DOTALL)
+                clean_content_lower = clean_content.lower()
+
+                # An invocation of /plan is a planning command, never an approval to execute
+                if "/plan" in clean_content_lower:
                     continue
 
-                try:
-                    step = json.loads(line)
-                except Exception:
-                    step = {}
-
-                source = step.get("source", "")
-                step_type = step.get("type", "")
-                content = str(step.get("content", ""))
-                content_lower = content.lower()
-
-                # Update seen_implementation_plan tracking linearly (no quadratic concatenation)
-                if not seen_implementation_plan:
-                    if "implementation_plan" in content_lower or "implementation_plan" in line.lower():
-                        seen_implementation_plan = True
-
-                # Check for plan approval ONLY from user explicit input
-                if source == "USER_EXPLICIT" and step_type == "USER_INPUT":
-                    # Strip system-injected metadata (e.g. <ADDITIONAL_METADATA> which contains /plan definition)
-                    clean_content = re.sub(r"<ADDITIONAL_METADATA>.*?</ADDITIONAL_METADATA>", "", content, flags=re.DOTALL)
-                    clean_content_lower = clean_content.lower()
-
-                    # An invocation of /plan is a planning command, never an approval to execute
-                    if "/plan" in clean_content_lower:
-                        continue
-
-                    if "the user has approved this document" in clean_content_lower:
+                if "the user has approved this document" in clean_content_lower:
+                    last_approval_idx = idx
+                elif re.search(r"\bproceed\b", clean_content_lower):
+                    if "implementation_plan" in clean_content_lower or seen_implementation_plan or has_plan_file:
                         last_approval_idx = idx
-                    elif re.search(r"\bproceed\b", clean_content_lower):
-                        if "implementation_plan" in clean_content_lower or seen_implementation_plan or has_plan_file:
-                            last_approval_idx = idx
 
-                # Deactivate plan mode when walkthrough.md is generated via tool calls or model response
-                if last_approval_idx != -1 and idx > last_approval_idx:
-                    if _is_walkthrough_step(step):
-                        last_walkthrough_idx = idx
+            # Deactivate plan mode when walkthrough.md is generated via tool calls or model response
+            if last_approval_idx != -1 and idx > last_approval_idx:
+                if _is_walkthrough_step(step):
+                    last_walkthrough_idx = idx
 
         if last_approval_idx == -1:
             return False
@@ -435,17 +571,19 @@ def main(argv=None, stdin=None, stdout=None):
             return emit({"decision": "deny", "reason": "Empty input payload"})
         data = json.loads(raw_payload)
 
+        ledger = Ledger()
+
         def emit_deny(reason):
             try:
                 turn_id, lines = get_turn_state(data.get("transcriptPath", ""))
                 conv_id = data.get("conversationId", "unknown")
                 step_idx = data.get("stepIdx", 0)
-                Ledger().insert_event(conv_id, str(turn_id), "PreToolUse", str(step_idx), "enforce", Event.PRIMARY_TOOL_DENIED.name, json.dumps({"reason": reason}))
+                ledger.insert_event(conv_id, str(turn_id), "PreToolUse", str(step_idx), "enforce", Event.PRIMARY_TOOL_DENIED.name, json.dumps({"reason": reason}))
             except Exception as exc:
                 sys.stderr.write(f"Warning: {exc}\n")
             emit({"decision": "deny", "reason": reason})
 
-        is_sub, may_delegate, remaining_depth, _, _ = is_subagent(data)
+        is_sub, may_delegate, remaining_depth, _, _ = is_subagent(data, ledger=ledger)
         tool_call = data.get("toolCall", {})
         tool_name = tool_call.get("name", "")
         args = tool_call.get("args", {})
@@ -463,6 +601,37 @@ def main(argv=None, stdin=None, stdout=None):
                 return emit_deny(tamper_err)
 
         if not is_sub:
+            if tool_name in ["manage_subagents", "default_api:manage_subagents"]:
+                action = args.get("Action")
+                now = time.time()
+                if action == "kill":
+                    conv_ids = args.get("ConversationIds") or []
+                    for sub_id in conv_ids:
+                        try:
+                            with ledger._get_connection() as conn:
+                                conn.execute(
+                                    "UPDATE work_items SET status = 'TERMINATED', updated_at = ? "
+                                    "WHERE status = 'ACTIVE' AND work_id IN (SELECT token_id FROM tokens WHERE claimed_by = ?)",
+                                    (now, str(sub_id)),
+                                )
+                                conn.commit()
+                        except Exception as exc:
+                            sys.stderr.write(f"Warning in manage_subagents kill: {exc}\n")
+                    return emit({"decision": "allow"})
+                elif action == "kill_all":
+                    parent_conv = data.get("conversationId", "")
+                    try:
+                        with ledger._get_connection() as conn:
+                            conn.execute(
+                                "UPDATE work_items SET status = 'TERMINATED', updated_at = ? "
+                                "WHERE status = 'ACTIVE' AND parent_conv_id = ?",
+                                (now, parent_conv),
+                            )
+                            conn.commit()
+                    except Exception as exc:
+                        sys.stderr.write(f"Warning in manage_subagents kill_all: {exc}\n")
+                    return emit({"decision": "allow"})
+
             transcript_path = data.get("transcriptPath", "")
             artifact_dir = data.get("artifactDirectoryPath") or data.get("artifact_dir")
             if not artifact_dir:
@@ -505,13 +674,13 @@ def main(argv=None, stdin=None, stdout=None):
             if tool_name in ["run_command", "default_api:run_command"]:
                 conv_id = data.get("conversationId", "unknown")
                 turn_id, _ = get_turn_state(data.get("transcriptPath", ""))
-                doom_err = check_subagent_doom_loop(Ledger(), conv_id, str(turn_id), tool_name, args)
+                doom_err = check_subagent_doom_loop(ledger, conv_id, str(turn_id), tool_name, args)
                 if doom_err:
                     return emit_deny(doom_err)
                 return emit({"decision": "allow"})
             if tool_name in MUTATION_TOOLS:
                 conv_id = data.get("conversationId", "unknown")
-                record_subagent_file_edit(conv_id, target_file, Ledger())
+                record_subagent_file_edit(conv_id, target_file, ledger)
                 return emit({"decision": "allow"})
 
         return emit({"decision": "allow"})

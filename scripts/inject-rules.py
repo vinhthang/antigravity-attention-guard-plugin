@@ -45,9 +45,13 @@ def main(argv=None, stdin=None, stdout=None):
             parent_conv_id = payload.get("conversationId", "unknown")
             step_idx = payload.get("stepIdx", 0)
             turn_id, _ = get_turn_state(payload.get("transcriptPath", ""))
-            is_sub, current_may_delegate, current_depth, _, _ = is_subagent(payload)
-            parent_is_thinking = is_thinking_model(get_primary_model(payload))
             ledger = Ledger()
+            try:
+                ledger.reconcile_orphaned_work_items(parent_conv_id, str(turn_id), current_step_idx=str(step_idx))
+            except Exception as exc:
+                sys.stderr.write(f"Warning in reconcile_orphaned_work_items: {exc}\n")
+            is_sub, current_may_delegate, current_depth, _, _ = is_subagent(payload, ledger=ledger)
+            parent_is_thinking = is_thinking_model(get_primary_model(payload))
             for sa in subagents:
                 type_name = str(sa.get("TypeName") or "").strip()
                 role_lower = str(sa.get("Role") or "").strip().lower()
