@@ -1,0 +1,5 @@
+# Execution Tasks: Precision Inline `python -c` Polling Signature Normalization
+
+- [x] **Task 1 (`REQ-030`, `ADR-001`)**: Add failing TDD regression test `test_req030_inline_python_analytical_scripts_not_collapsed_to_poll_file` in `tests/test_ledger_performance.py` and update `normalize_command_signature()` in `scripts/enforce-delegation.py` so only direct non-analytical `open`/`Path` chained read/tail one-liners collapse to `POLL_FILE:<path>`.
+- [x] **Task 2 (`REQ-030`, `ADR-001`)**: Add corresponding TDD regression test in `/Users/thanghoang/github/dsh-attention-guard-plugin/tests/circuit-breaker.spec.ts` and update `normalizeCommandSignature()` in `/Users/thanghoang/github/dsh-attention-guard-plugin/src/circuit-breaker.ts`.
+- [x] **Task 3 (`REQ-030`)**: Run full test suites across both repositories (`rtk pytest` in `antigravity-attention-guard-plugin` and `rtk pnpm test && rtk pnpm run typecheck && rtk pnpm run build` in `dsh-attention-guard-plugin`) and record verbatim verification output in `verification.md`.

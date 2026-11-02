@@ -1,0 +1,63 @@
+{
+  "spec_hash": "9190b03904570abb8e25fcb97a122fb73777aaf703fd42ec887ee025e2a4480a",
+  "auditor_model": "claude-opus-4-6",
+  "verdict": "PASS",
+  "requirements_evaluated": {
+    "REQ-027": {
+      "design_aligned": true,
+      "design_rationale": "Sections 1, 2.1, and 2.2 define active_bg_tasks extraction in scripts/common.py (excluding Timer:/Cron: and IsDaemon: true, clearing only on SYSTEM SYSTEM_MESSAGE completion/cancellation or GENERIC cancellation), the PreToolUse subagent send_message fence in scripts/enforce-delegation.py, and the Background Task Completion Fence rule in rules/EXECUTOR.md.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 1 (parse_transcript in scripts/common.py), Task 2 (enforce-delegation.py and rules/EXECUTOR.md), and Task 5 (TDD regression tests in tests/test_ledger_performance.py) provide falsifiable steps for REQ-027.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-001 evaluates trade-offs (blocking intermediate send_message while non-daemon background tasks run, excluding IsDaemon: true) and rejected alternatives (prompt-only rules, subprocess RPC) while preserving module cohesion and encapsulation."
+    },
+    "REQ-028": {
+      "design_aligned": true,
+      "design_rationale": "Sections 1, 2.1, and 2.3 specify work_items reactivation/upsert and WORK_PREPARED/HANDOFF_ACCEPTED emission on Primary Agent send_message in scripts/enforce-delegation.py and scripts/record-tool-result.py (with hooks.json matcher update), dynamic parent_turn_id resolution in scripts/common.py (is_subagent), active_timers_since_wakeup tracking, and the 300s watchdog timer gate in scripts/attention-check.py.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 1 (scripts/common.py), Task 3 (scripts/enforce-delegation.py, scripts/record-tool-result.py, hooks.json, scripts/attention-check.py), and Task 5 (TDD regression tests in tests/test_ledger_performance.py) map directly to REQ-028.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-002 evaluates trade-offs (scoping watchdog check to turns with delegation or active_bg_tasks for backward compatibility with bare SQLite unit fixtures) and rejected alternatives (spawning timers inside Stop hooks) without arbitrary file size caps."
+    },
+    "REQ-029": {
+      "design_aligned": true,
+      "design_rationale": "Sections 1 and 2.4 specify stripping trailing punctuation and skipping lexical /.gemini/ paths before Path.resolve() in extract_prompt_workspaces() within spec-gate.py.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 4 (spec-gate.py extract_prompt_workspaces update) and Task 5 (TDD regression tests in tests/test_ledger_performance.py) provide concrete, falsifiable tasks for REQ-029.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-003 evaluates trade-offs (lexical ~/.gemini/ exclusion in prompt extraction while keeping symlink resolution on direct file mutation tools) and rejected alternatives (any-workspace pass policy)."
+    }
+  },
+  "requirements": {
+    "REQ-027": {
+      "design_aligned": true,
+      "design_rationale": "Sections 1, 2.1, and 2.2 define active_bg_tasks extraction in scripts/common.py (excluding Timer:/Cron: and IsDaemon: true, clearing only on SYSTEM SYSTEM_MESSAGE completion/cancellation or GENERIC cancellation), the PreToolUse subagent send_message fence in scripts/enforce-delegation.py, and the Background Task Completion Fence rule in rules/EXECUTOR.md.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 1 (parse_transcript in scripts/common.py), Task 2 (enforce-delegation.py and rules/EXECUTOR.md), and Task 5 (TDD regression tests in tests/test_ledger_performance.py) provide falsifiable steps for REQ-027.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-001 evaluates trade-offs (blocking intermediate send_message while non-daemon background tasks run, excluding IsDaemon: true) and rejected alternatives (prompt-only rules, subprocess RPC) while preserving module cohesion and encapsulation."
+    },
+    "REQ-028": {
+      "design_aligned": true,
+      "design_rationale": "Sections 1, 2.1, and 2.3 specify work_items reactivation/upsert and WORK_PREPARED/HANDOFF_ACCEPTED emission on Primary Agent send_message in scripts/enforce-delegation.py and scripts/record-tool-result.py (with hooks.json matcher update), dynamic parent_turn_id resolution in scripts/common.py (is_subagent), active_timers_since_wakeup tracking, and the 300s watchdog timer gate in scripts/attention-check.py.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 1 (scripts/common.py), Task 3 (scripts/enforce-delegation.py, scripts/record-tool-result.py, hooks.json, scripts/attention-check.py), and Task 5 (TDD regression tests in tests/test_ledger_performance.py) map directly to REQ-028.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-002 evaluates trade-offs (scoping watchdog check to turns with delegation or active_bg_tasks for backward compatibility with bare SQLite unit fixtures) and rejected alternatives (spawning timers inside Stop hooks) without arbitrary file size caps."
+    },
+    "REQ-029": {
+      "design_aligned": true,
+      "design_rationale": "Sections 1 and 2.4 specify stripping trailing punctuation and skipping lexical /.gemini/ paths before Path.resolve() in extract_prompt_workspaces() within spec-gate.py.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 4 (spec-gate.py extract_prompt_workspaces update) and Task 5 (TDD regression tests in tests/test_ledger_performance.py) provide concrete, falsifiable tasks for REQ-029.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-003 evaluates trade-offs (lexical ~/.gemini/ exclusion in prompt extraction while keeping symlink resolution on direct file mutation tools) and rejected alternatives (any-workspace pass policy)."
+    }
+  }
+}

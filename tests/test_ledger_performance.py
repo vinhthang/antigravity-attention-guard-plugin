@@ -642,3 +642,92 @@ def test_check_destructive_command_multiline_backslash_rm():
     assert enforce_delegation.check_destructive_command(multiline_git) is not None
 
 
+def test_req030_inline_python_analytical_scripts_not_collapsed_to_poll_file(tmp_path):
+    """REQ-030: Inline python -c analytical scripts are not collapsed to POLL_FILE."""
+    db_path = str(tmp_path / "test_doom_req030.db")
+    ledger = Ledger(db_path)
+    conv_id = "subagent-doom-req030"
+
+    fn = getattr(enforce_delegation, "normalize_command_signature", None)
+    assert fn is not None
+
+    # a) Direct file-polling one-liners still normalize to POLL_FILE:/tmp/a.log
+    cmd_open = 'rtk python3 -c "open(\'/tmp/a.log\').readlines()[-26:]"'
+    cmd_path = 'rtk python3 -c "Path(\'/tmp/a.log\').read_text().splitlines()[-10:]"'
+    assert fn(cmd_open) == "POLL_FILE:/tmp/a.log"
+    assert fn(cmd_path) == "POLL_FILE:/tmp/a.log"
+
+    # b) Multi-line or analytical python3 -c scripts that construct Path(...) with for loops
+    #    or import json/re/xml do NOT normalize to POLL_FILE:...
+    analytical1 = (
+        'rtk python3 -c "'
+        'from pathlib import Path; import json; '
+        'p = Path(\'/Users/thanghoang/github/books/runs/trang_tu\'); '
+        'data = [json.loads(line) for line in open(p / \'meta.json\').readlines()]; '
+        'print(len(data))"'
+    )
+    analytical2 = (
+        'rtk python3 -c "'
+        'import re; '
+        'lines = open(\'/Users/thanghoang/github/books/runs/trang_tu/notes.txt\').readlines(); '
+        'for line in lines: '
+        '    if re.search(r\'^#\', line): print(line)"'
+    )
+    analytical3 = (
+        'rtk python3 -c "'
+        'import xml.etree.ElementTree as ET; '
+        'tree = ET.parse(\'/Users/thanghoang/github/books/runs/trang_tu/content.opf\'); '
+        'root = tree.getroot(); '
+        'for child in root: print(child.tag)"'
+    )
+    assert not fn(analytical1).startswith("POLL_FILE:")
+    assert not fn(analytical2).startswith("POLL_FILE:")
+    assert not fn(analytical3).startswith("POLL_FILE:")
+
+    # c) Three consecutive distinct analytical python3 -c scripts reading
+    #    Sources/OpenKey/macOS-Swift/Sources/OpenKeySwiftCore/VietnameseDictionary.swift
+    #    are allowed by check_subagent_doom_loop()
+    swift_file = "Sources/OpenKey/macOS-Swift/Sources/OpenKeySwiftCore/VietnameseDictionary.swift"
+    script1 = (
+        f'rtk python3 -c "'
+        f'import re; '
+        f'lines = open(\'{swift_file}\').readlines(); '
+        f'matches = [l for l in lines if \'func\' in l]; '
+        f'print(len(matches))"'
+    )
+    script2 = (
+        f'rtk python3 -c "'
+        f'for i, line in enumerate(open(\'{swift_file}\').readlines()): '
+        f'    if \'class\' in line: print(i, line)"'
+    )
+    script3 = (
+        f'rtk python3 -c "'
+        f'import json; '
+        f'content = open(\'{swift_file}\').read(); '
+        f'print(json.dumps({{\"len\": len(content)}}))"'
+    )
+
+    assert not fn(script1).startswith("POLL_FILE:")
+    assert not fn(script2).startswith("POLL_FILE:")
+    assert not fn(script3).startswith("POLL_FILE:")
+
+    err1 = enforce_delegation.check_subagent_doom_loop(ledger, conv_id, "1", "run_command", {"CommandLine": script1})
+    assert err1 is None
+    err2 = enforce_delegation.check_subagent_doom_loop(ledger, conv_id, "1", "run_command", {"CommandLine": script2})
+    assert err2 is None
+    err3 = enforce_delegation.check_subagent_doom_loop(ledger, conv_id, "1", "run_command", {"CommandLine": script3})
+    assert err3 is None
+
+    # d) Three consecutive executions of the exact same analytical python3 -c script
+    #    still trigger check_subagent_doom_loop() on the 3rd execution
+    conv_id_repeat = "subagent-doom-repeat"
+    r1 = enforce_delegation.check_subagent_doom_loop(ledger, conv_id_repeat, "1", "run_command", {"CommandLine": script1})
+    assert r1 is None
+    r2 = enforce_delegation.check_subagent_doom_loop(ledger, conv_id_repeat, "1", "run_command", {"CommandLine": script1})
+    assert r2 is None
+    r3 = enforce_delegation.check_subagent_doom_loop(ledger, conv_id_repeat, "1", "run_command", {"CommandLine": script1})
+    assert r3 is not None
+    assert "Subagent doom-loop circuit breaker" in r3
+
+
+

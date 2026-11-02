@@ -295,11 +295,20 @@ def normalize_command_signature(cmd: str) -> str:
             file_path = file_candidates[-1]
             return f"POLL_FILE:{os.path.normpath(file_path)}"
 
-    # Check python -c reading a file
+    # Check python -c reading/tailing a file directly without analytical logic (REQ-030, ADR-001)
     if re.search(r"\bpython[0-9.]*\s+-c\b", c):
         is_write = any(w in c for w in ('"w"', "'w'", '"a"', "'a'", '"w+"', "'w+'", 'write_text', 'write_bytes'))
-        if not is_write and any(r in c for r in ('readlines', 'read_text', 'read(', 'readline')):
-            m_open = re.search(r"(?:open|Path)\s*\(\s*['\"]([^'\"]+)['\"]", c)
+        has_analysis = bool(
+            re.search(
+                r"\b(?:import\s+(?:re|json|xml|ast|difflib|csv|sqlite3|collections)|re\.|json\.|difflib\.|ET\.|def\s+\w+|for\s+[\w,\s()]+\s+in\b)",
+                c,
+            )
+        )
+        if not is_write and not has_analysis:
+            m_open = re.search(
+                r"(?:open|Path)\s*\(\s*['\"]([^'\"]+)['\"][^)]*\)\s*\.\s*(?:readlines|read_text|read|readline)\b",
+                c,
+            )
             if m_open:
                 file_path = m_open.group(1).strip()
                 return f"POLL_FILE:{os.path.normpath(file_path)}"
