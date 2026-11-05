@@ -292,3 +292,93 @@ def test_validate_plugin_surface_home_relative_script_path(tmp_path):
     assert ok is True, f"Surface errors: {errs}"
     assert not any("ledger.py" in e for e in errs)
 
+
+def test_req_032_autotrigger_custom_rule_file_fallback(tmp_path):
+    """REQ-032: Fall back to first sorted rules/*.md file when rules/AGENTS.md is absent."""
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    rule_file = rules_dir / "google-cloud-discovery.md"
+    rule_file.write_text(
+        "<rule name=\"gcp-discovery\">\n"
+        "<description>Discovery</description>\n"
+        "<instructions>\n"
+        "### Instructions\n"
+        "</instructions>\n"
+        "</rule>\n",
+        encoding="utf-8"
+    )
+
+    skill_dir = tmp_path / "skills" / "gcloud"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: gcloud\ndescription: Provides safety-critical gcloud CLI operations\n---\n"
+        "# GCloud Skill\n",
+        encoding="utf-8"
+    )
+
+    ok, errs, census = validate_plugin_surface(tmp_path, repair_triggers=True)
+    assert ok is True, f"Surface validation errors: {errs}"
+    assert len(errs) == 0
+
+    # Verify rules/google-cloud-discovery.md was modified with gcloud trigger
+    content = rule_file.read_text(encoding="utf-8")
+    assert "consult skill `gcloud`" in content
+    assert not (rules_dir / "AGENTS.md").exists()
+
+
+def test_autotrigger_always_on_max_and_boundary_cap():
+    """Harden autotrigger against cap mutations (lines 161 and 192)."""
+    trigger_len = len(DEFAULT_SURFACE.trigger_line.format(name="s1", desc="desc1"))
+    base = "rule\n"
+    target_cap = len(base) + trigger_len
+
+    # Exact boundary match (len == target_cap) must be accepted
+    tree_exact = {
+        "rules/AGENTS.md": base,
+        "skills/s1/SKILL.md": "---\nname: s1\ndescription: desc1\n---\n",
+    }
+    repaired_exact = autotrigger(DEFAULT_SURFACE, tree_exact, always_on_max=target_cap)
+    assert repaired_exact == ["s1"]
+
+    # When cap is smaller than target_cap, passing always_on_max must reject repair
+    tree_overflow = {
+        "rules/AGENTS.md": base,
+        "skills/s1/SKILL.md": "---\nname: s1\ndescription: desc1\n---\n",
+    }
+    repaired_overflow = autotrigger(DEFAULT_SURFACE, tree_overflow, always_on_max=target_cap - 1)
+    assert repaired_overflow == []
+
+
+def test_always_on_max_exact_equality(tmp_path):
+    """Harden line 332 against > to >= mutation when aon_len == cap."""
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "AGENTS.md").write_text("x" * 100, encoding="utf-8")
+
+    ok, errs, census = validate_plugin_surface(tmp_path, always_on_max=100)
+    # Exactly 100 chars with cap 100 must not exceed budget
+    assert not any("Always-on rules exceed budget" in e for e in errs)
+
+
+def test_extract_frontmatter_yaml_block_scalars():
+    """Regression test for P1: extract_frontmatter must parse multiline YAML block scalars (>-)."""
+    from surface_validator import extract_frontmatter
+    content = (
+        "---\n"
+        "name: test-skill\n"
+        "metadata:\n"
+        "  version: \"1.0\"\n"
+        "description: >-\n"
+        "  This is a multiline\n"
+        "  description for testing\n"
+        "  block scalars.\n"
+        "---\n"
+        "# Skill Content\n"
+    )
+    fm = extract_frontmatter(content)
+    assert fm["name"] == "test-skill"
+    assert fm["description"] == "This is a multiline description for testing block scalars."
+
+
+
+

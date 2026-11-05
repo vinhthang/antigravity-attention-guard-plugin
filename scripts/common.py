@@ -136,6 +136,11 @@ def parse_transcript(transcript_path: str) -> dict:
         "tokens": [],
         "first_system_sender": None,
         "steps": [],
+        "active_bg_tasks": [],
+        "active_timers_since_wakeup": [],
+        "has_delegation_in_turn": False,
+        "active_context_chars": 0,
+        "has_valid_json_steps": False,
     }
     if not transcript_path or not os.path.exists(transcript_path):
         return empty_result
@@ -154,8 +159,21 @@ def parse_transcript(transcript_path: str) -> dict:
     tokens = []
     first_system_sender = None
     steps = []
-    token_pattern = re.compile(r'\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]')
+    active_bg_tasks = []
+    active_timers_since_wakeup = []
+    current_turn_delegated = False
+    active_context_chars = 0
+    has_valid_json_steps = False
+    planner_tool_calls = []
+    valid_schedule_calls = []
+
+    token_pattern = re.compile(r'\[ANTIGRAVITY_TOKEN:([a-fA-F0-9\-]+)\]')
     sender_pattern = re.compile(r'\bsender=([0-9a-fA-F\-]{36})\b')
+    task_bg_pattern = re.compile(r'Tool is running as a background task with task id:\s*([^\s/]+/task-\d+|task-\d+)')
+    task_desc_pattern = re.compile(r'Task Description:\s*(.*)')
+    task_cancel_pattern = re.compile(r'Task "([^"]+)" cancel+ed\.')
+    system_sender_task_pattern = re.compile(r'\bsender=([^\s/]+/task-\d+|task-\d+)\b')
+    system_task_finish_pattern = re.compile(r'Task id "([^"]+)"\s+(?:finished|was cancel+ed)')
 
     try:
         with open(abs_p, "r", encoding="utf-8") as f:
@@ -170,11 +188,40 @@ def parse_transcript(transcript_path: str) -> dict:
                     step = {}
                 steps.append((idx, line_str, step))
 
+                if isinstance(step, dict) and bool(step):
+                    has_valid_json_steps = True
+                    stype_raw = step.get("type", "")
+                    content_str = str(step.get("content") or "")
+                    if stype_raw in ("CHECKPOINT", "COMPACTION") or "compacted" in str(stype_raw).lower() or "resuming from a compaction" in content_str.lower():
+                        active_context_chars = 0
+                    else:
+                        active_context_chars += len(str(step.get("content") or ""))
+                        tool_calls = step.get("tool_calls") or []
+                        if tool_calls:
+                            try:
+                                active_context_chars += len(json.dumps(tool_calls))
+                            except Exception as exc:
+                                _ = exc
+
                 source = str(step.get("source", ""))
                 stype = step.get("type", "")
 
                 if source.startswith("USER") and stype == "USER_INPUT":
                     turn_id = step.get("step_index", turn_id)
+                    current_turn_delegated = False
+                    active_timers_since_wakeup.clear()
+
+                if source == "SYSTEM" and stype == "SYSTEM_MESSAGE":
+                    active_timers_since_wakeup.clear()
+                    content = str(step.get("content") or "")
+                    for m in system_sender_task_pattern.finditer(content):
+                        tid = m.group(1).strip()
+                        if tid in active_bg_tasks:
+                            active_bg_tasks.remove(tid)
+                    for m in system_task_finish_pattern.finditer(content):
+                        tid = m.group(1).strip()
+                        if tid in active_bg_tasks:
+                            active_bg_tasks.remove(tid)
 
                 if stype in ("USER_INPUT", "SYSTEM_MESSAGE"):
                     content = str(step.get("content") or "")
@@ -189,12 +236,115 @@ def parse_transcript(transcript_path: str) -> dict:
                     if m:
                         first_system_sender = m.group(1)
 
+                if stype == "PLANNER_RESPONSE":
+                    tcs = step.get("tool_calls") or []
+                    if isinstance(tcs, list):
+                        planner_tool_calls = [tc for tc in tcs if isinstance(tc, dict)]
+                        if any(
+                            isinstance(tc, dict)
+                            and tc.get("name") in ("invoke_subagent", "default_api:invoke_subagent", "send_message", "default_api:send_message")
+                            for tc in tcs
+                        ):
+                            current_turn_delegated = True
+                        for tc in tcs:
+                            if isinstance(tc, dict) and tc.get("name") in ("schedule", "default_api:schedule"):
+                                args = tc.get("args") or {}
+                                dur_raw = args.get("DurationSeconds")
+                                cron_raw = args.get("CronExpression")
+                                cond_raw = str(args.get("TimerCondition") or "never").strip().lower().strip('"\'')
+                                # REQ-028: Watchdog timer requires DurationSeconds (>= 60s), not a cron schedule
+                                if not cron_raw and dur_raw is not None:
+                                    try:
+                                        dur_val = int(dur_raw)
+                                        if dur_val >= 60 and cond_raw in ("any", "never"):
+                                            valid_schedule_calls.append(tc)
+                                            call_key = f"schedule_call_{step.get('step_index', idx)}"
+                                            if call_key not in active_timers_since_wakeup:
+                                                active_timers_since_wakeup.append(call_key)
+                                    except (ValueError, TypeError) as conv_err:
+                                        _ = conv_err
+
+                if stype == "GENERIC":
+                    content = str(step.get("content") or "")
+                    m_bg = task_bg_pattern.search(content) if ("Command output:" not in content and "Command exited with code" not in content) else None
+                    if m_bg:
+                        task_id = m_bg.group(1).strip()
+                        is_own_task = True
+                        if "/" in task_id:
+                            path_parts = abs_p.split(os.sep)
+                            if "brain" in path_parts:
+                                brain_idx = path_parts.index("brain")
+                                if brain_idx + 1 < len(path_parts):
+                                    conv_from_path = path_parts[brain_idx + 1]
+                                    is_own_task = task_id.startswith(f"{conv_from_path}/")
+                        if is_own_task:
+                            m_desc = task_desc_pattern.search(content)
+                            desc = m_desc.group(1).strip() if m_desc else ""
+                            if desc.startswith("Timer:"):
+                                if valid_schedule_calls:
+                                    valid_schedule_calls.pop(0)
+                                    if task_id not in active_timers_since_wakeup:
+                                        active_timers_since_wakeup.append(task_id)
+                            elif not desc.startswith("Cron:"):
+                                matched_tc = None
+                                if planner_tool_calls:
+                                    for i, tc in enumerate(planner_tool_calls):
+                                        if tc.get("name") in ("run_command", "default_api:run_command"):
+                                            tc_args = tc.get("args") or {}
+                                            tc_summary = str(tc_args.get("toolSummary") or "").strip().strip('"\'')
+                                            tc_cmd = str(tc_args.get("CommandLine") or "").strip().strip('"\'')
+                                            if (tc_summary and (tc_summary in desc or desc in tc_summary)) or \
+                                               (tc_cmd and (tc_cmd in desc or desc in tc_cmd)):
+                                                matched_tc = planner_tool_calls.pop(i)
+                                                break
+                                    if not matched_tc:
+                                        for i, tc in enumerate(planner_tool_calls):
+                                            if tc.get("name") in ("run_command", "default_api:run_command"):
+                                                matched_tc = planner_tool_calls.pop(i)
+                                                break
+                                raw_is_daemon = (matched_tc.get("args") or {}).get("IsDaemon") if matched_tc else False
+                                is_daemon = raw_is_daemon if isinstance(raw_is_daemon, bool) else (str(raw_is_daemon or "").strip().lower().strip('"\'') in ("true", "1", "yes"))
+                                if not is_daemon and task_id not in active_bg_tasks:
+                                    active_bg_tasks.append(task_id)
+
+                    if "Command exited with code" in content or "Completed At:" in content:
+                        for i, tc in enumerate(planner_tool_calls):
+                            if tc.get("name") in ("run_command", "default_api:run_command"):
+                                tc_args = tc.get("args") or {}
+                                tc_summary = str(tc_args.get("toolSummary") or "").strip().strip('"\'')
+                                tc_cmd = str(tc_args.get("CommandLine") or "").strip().strip('"\'')
+                                if (tc_summary and tc_summary in content) or (tc_cmd and tc_cmd in content):
+                                    planner_tool_calls.pop(i)
+                                    break
+                        else:
+                            for i, tc in enumerate(planner_tool_calls):
+                                if tc.get("name") in ("run_command", "default_api:run_command"):
+                                    planner_tool_calls.pop(i)
+                                    break
+
+                    m_cancel = task_cancel_pattern.search(content)
+                    if m_cancel:
+                        cancelled_id = m_cancel.group(1).strip()
+                        if cancelled_id in active_bg_tasks:
+                            active_bg_tasks.remove(cancelled_id)
+                        if cancelled_id in active_timers_since_wakeup:
+                            active_timers_since_wakeup.remove(cancelled_id)
+                            for t in reversed(list(active_timers_since_wakeup)):
+                                if t.startswith("schedule_call_"):
+                                    active_timers_since_wakeup.remove(t)
+                                    break
+
         result = {
             "turn_id": turn_id,
             "lines_count": lines_count,
             "tokens": tokens,
             "first_system_sender": first_system_sender,
             "steps": steps,
+            "active_bg_tasks": active_bg_tasks,
+            "active_timers_since_wakeup": active_timers_since_wakeup,
+            "has_delegation_in_turn": current_turn_delegated,
+            "active_context_chars": active_context_chars,
+            "has_valid_json_steps": has_valid_json_steps,
         }
         _TRANSCRIPT_CACHE[abs_p] = (st.st_mtime_ns, st.st_size, result)
         return result
@@ -237,18 +387,56 @@ def is_subagent(data, ledger=None):
                         if conv_id == parent_conv_id:
                             continue
 
+                        w_row = conn.execute(
+                            "SELECT parent_conv_id, parent_turn_id FROM work_items WHERE work_id = ?",
+                            (token,)
+                        ).fetchone()
+                        if w_row:
+                            if w_row[0]:
+                                parent_conv_id = w_row[0]
+                            if w_row[1]:
+                                parent_turn_id = w_row[1]
+
+                        t_row = conn.execute(
+                            "SELECT claimed, claimed_by FROM tokens WHERE token_id = ?",
+                            (token,)
+                        ).fetchone()
+                        newly_claimed = (t_row is None or t_row[0] == 0 or t_row[1] is None)
+
                         if ledger.claim_token(token, conv_id):
-                            ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "WORK_CLAIMED")
-                            ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "RUNNING")
+                            if newly_claimed:
+                                ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "WORK_CLAIMED")
+                                ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "RUNNING")
                             return True, may_delegate, remaining_depth, parent_conv_id, parent_turn_id
 
         if os.environ.get("AGY_DISABLE_SENDER_FALLBACK") != "1":
             parent_conv_id = parsed.get("first_system_sender")
             if parent_conv_id and parent_conv_id != conv_id:
-                return True, False, 0, parent_conv_id, "0"
+                parent_turn_id = "0"
+                if ledger is None:
+                    ledger = Ledger()
+                with ledger._get_connection() as conn:
+                    w_row = conn.execute(
+                        """
+                        SELECT w.parent_conv_id, w.parent_turn_id
+                        FROM work_items w
+                        LEFT JOIN tokens t ON w.work_id = t.token_id
+                        WHERE t.claimed_by = ? OR w.work_id = ?
+                        ORDER BY w.updated_at DESC, w.created_at DESC
+                        LIMIT 1
+                        """,
+                        (conv_id, conv_id)
+                    ).fetchone()
+                    if w_row:
+                        if w_row[0]:
+                            parent_conv_id = w_row[0]
+                        if w_row[1]:
+                            parent_turn_id = w_row[1]
+                return True, False, 0, parent_conv_id, parent_turn_id
 
     except Exception as exc:
         sys.stderr.write(f"Error in is_subagent: {exc}\n")
 
     return False, False, 0, None, None
+
 

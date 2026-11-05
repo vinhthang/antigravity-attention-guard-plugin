@@ -246,3 +246,154 @@ def test_fallback_to_ledger_session_stats_when_transcript_missing():
     assert "injectSteps" in res3
     assert l.get_last_refreshed_tokens("fb_sess_nonexist") == 25000
 
+
+def test_req_031_active_context_chars_and_refresh_calculation(tmp_path):
+    """REQ-031: Calculate tokens from active_context_chars (excluding thinking and pre-compaction)."""
+    import ledger
+    import common
+    l = ledger.Ledger()
+
+    t_file = tmp_path / "transcript_with_thinking.jsonl"
+    step2_content = "Execute task"
+    step3_content = "Finished task execution successfully"
+    tool_calls = [{"name": "read_file", "args": {"Path": "/workspace/a.txt"}}]
+    tool_calls_str = json.dumps(tool_calls)
+
+    lines = [
+        json.dumps({"source": "USER", "type": "USER_INPUT", "content": "Ancient history before compaction" * 100}),
+        json.dumps({"source": "MODEL", "type": "COMPACTION", "content": "Context compacted"}),
+        json.dumps({"source": "USER", "type": "USER_INPUT", "content": step2_content}),
+        json.dumps({
+            "source": "MODEL",
+            "type": "PLANNER_RESPONSE",
+            "content": step3_content,
+            "thinking": "MASSIVE THINKING TRACE " * 10000,
+            "tool_calls": tool_calls
+        }),
+    ]
+    t_file.write_text("\n".join(lines) + "\n")
+
+    parsed = common.parse_transcript(str(t_file))
+    assert parsed.get("has_valid_json_steps") is True
+    expected_chars = len(step2_content) + len(step3_content) + len(tool_calls_str)
+    assert parsed.get("active_context_chars") == expected_chars
+
+    # Test refresh token volume calculation using active_context_chars
+    # If using os.path.getsize // 4, tokens would be > 50,000 and trigger refresh!
+    # With active_context_chars // 4 (< 100 tokens), it must NOT trigger refresh on invocation 3
+    payload = {
+        "transcriptPath": str(t_file),
+        "sessionId": "active_ctx_sess",
+        "invocationNum": 3
+    }
+    res = run_hook(payload)
+    assert res == {}, "Active context tokens are small (< 20K), so volume refresh should not fire"
+
+    # Verify ledger session_stats was synchronized with active_context_chars
+    total_toks, _ = l.get_session_token_stats("active_ctx_sess")
+    assert total_toks == expected_chars // 4
+
+
+def test_build_refresh_reminder_positional_args(tmp_path):
+    """Harden build_refresh_reminder positional args and None branches against mutations."""
+    import ledger
+    l = ledger.Ledger()
+
+    class MockLedger:
+        def audit_conversation_budget(self, c_id):
+            if c_id == "c_override":
+                return {"unique_workers": 88, "prepared_workers": 0}
+            return {"unique_workers": 99, "prepared_workers": 0}
+        def get_session_token_stats(self, c_id):
+            return 4000, 0
+
+    mock_l = MockLedger()
+
+    # len(args) == 1
+    rem1 = refresh_mod.build_refresh_reminder("c1", 50000)
+    assert "~50,000 tokens" in rem1
+
+    # len(args) == 2 (tests len(args) >= 2 -> args[1] is mock_l)
+    rem2 = refresh_mod.build_refresh_reminder("c1", 60000, mock_l)
+    assert "~60,000 tokens" in rem2
+    assert "Workers: 99" in rem2
+
+    # len(args) == 3 (tests len(args) >= 3 -> args[2] is 'c_override')
+    rem3 = refresh_mod.build_refresh_reminder("c1", 70000, mock_l, "c_override")
+    assert "~70,000 tokens" in rem3
+    assert "Workers: 88" in rem3
+
+    # len(args) == 4 (tests len(args) >= 4 -> args[3] is art_dir)
+    art_dir = str(tmp_path / "artifacts_pos")
+    rem4 = refresh_mod.build_refresh_reminder("c1", 80000, l, "c_override", art_dir)
+    assert "~80,000 tokens" in rem4
+    assert os.path.exists(os.path.join(art_dir, "session_checkpoint.md"))
+
+    # ledger=None instantiation and total_tokens=None fallback
+    rem_none_both = refresh_mod.build_refresh_reminder("c_none", total_tokens=None, ledger=None)
+    assert "Context Telemetry:" in rem_none_both
+
+    # total_tokens=None fetched from ledger
+    l.record_tool_chars("c_tokens_none", 16000) # 4000 tokens
+    rem_none_tokens = refresh_mod.build_refresh_reminder("c_tokens_none", ledger=l, total_tokens=None)
+    assert "~4,000 tokens" in rem_none_tokens
+
+    # token_budget == 0 boundary
+    rem_zero_budget = refresh_mod.build_refresh_reminder("c_zero", total_tokens=5000, token_budget=0)
+    assert "0.0% of 0k budget" in rem_zero_budget
+
+    # conv_id == 'unknown' does not infer artifact_dir
+    rem_unknown = refresh_mod.build_refresh_reminder("unknown", total_tokens=85000, artifact_dir=None)
+    assert "Pre-compaction state checkpoint written" not in rem_unknown
+
+    # Checkpoint threshold exact boundary
+    chk_dir = str(tmp_path / "chk_boundary")
+    rem_chk_exact = refresh_mod.build_refresh_reminder("c_chk", total_tokens=80000, checkpoint_threshold=80000, artifact_dir=chk_dir)
+    assert "Pre-compaction state checkpoint written" in rem_chk_exact
+
+    rem_chk_below = refresh_mod.build_refresh_reminder("c_chk", total_tokens=79999, checkpoint_threshold=80000, artifact_dir=chk_dir)
+    assert "Pre-compaction state checkpoint written" not in rem_chk_below
+
+
+def test_emit_reminder_default_text():
+    out = io.StringIO()
+    refresh_mod._emit_reminder(out, reminder_text=None)
+    data = json.loads(out.getvalue().strip())
+    assert refresh_mod.PRIMARY_RULES_REMINDER in data["injectSteps"][0]["ephemeralMessage"]
+
+
+def test_zero_interval_resets_to_default(monkeypatch):
+    import ledger
+    l = ledger.Ledger()
+    l.record_tool_chars("zero_int_sess", 100000)
+    monkeypatch.setenv("AGY_ATTENTION_GUARD_REFRESH_INTERVAL", "0")
+    # Interval 0 should reset to 25 and not divide by zero
+    assert run_hook({"sessionId": "zero_int_sess", "invocationNum": 24}) == {}
+    res = run_hook({"sessionId": "zero_int_sess", "invocationNum": 25})
+    assert "injectSteps" in res
+
+
+def test_invocation_zero_boundary_with_tokens():
+    import ledger
+    l = ledger.Ledger()
+    l.record_tool_chars("inv_zero_sess", 100000) # 25000 tokens
+    # invocationNum 0 should never trigger modulo reminder
+    res = run_hook({"sessionId": "inv_zero_sess", "invocationNum": 0})
+    assert res == {}
+
+
+def test_token_threshold_20000_exact_boundary():
+    import ledger
+    l = ledger.Ledger()
+    # Exactly 20,000 tokens (80,000 chars) -> not suppressed on invocation 25
+    l.record_tool_chars("exact_20k_sess", 80000)
+    res = run_hook({"sessionId": "exact_20k_sess", "invocationNum": 25})
+    assert "injectSteps" in res
+
+    # 19,999 tokens (79,996 chars) -> suppressed on invocation 25
+    l.record_tool_chars("below_20k_sess", 79996)
+    res_below = run_hook({"sessionId": "below_20k_sess", "invocationNum": 25})
+    assert res_below == {}
+
+
+

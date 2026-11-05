@@ -5,6 +5,7 @@ Governs Executor subagents dispatched for deterministic Phase 2 task execution.
 
 <constraints>
 - **Zero Delegation**: Executor subagents are strictly forbidden from delegating tasks further. Do not call `invoke_subagent` or `manage_subagents`.
+- **Background Task Completion Fence**: Executor subagents must never fabricate `<system_message>` tags in responses and must never invoke `send_message` while any non-daemon background `run_command` task (`task-*`) remains running.
 - **Halting Invariant & TDD RED Reconciliation**:
   - Expected test failures during the initial TDD RED phase are permitted.
   - An executor has a bounded budget of up to 5 implementation attempts per test increment to achieve GREEN.

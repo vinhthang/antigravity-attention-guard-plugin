@@ -195,11 +195,16 @@ class Ledger:
                 "DELETE FROM tokens WHERE created_at < ?",
                 (now - retention_seconds,)
             )
+            cur5 = conn.execute(
+                "DELETE FROM turns WHERE status = 'CLOSED' AND created_at < ?",
+                (now - retention_seconds,)
+            )
             conn.commit()
             return {
                 "events_deleted": cur1.rowcount + cur2.rowcount,
                 "work_items_deleted": cur3.rowcount,
                 "tokens_deleted": cur4.rowcount,
+                "turns_deleted": cur5.rowcount,
             }
 
     def _prune_opportunistically(self, min_interval_seconds: float = 3600.0):
@@ -286,11 +291,46 @@ class Ledger:
                     "INSERT INTO events (event_id, type, payload, created_at) VALUES (?, ?, ?, ?)",
                     (event_id, event_type, payload, now)
                 )
+                if event_type in ("WORK_PREPARED", "STOP_REQUESTED", "TURN_CLOSED") and actor_id != "unknown":
+                    turn_status = "CLOSED" if event_type == "TURN_CLOSED" else ("EXECUTION_ACTIVE" if event_type == "WORK_PREPARED" else "STOP_REQUESTED")
+                    turn_key = f"{actor_id}_{turn_id}"
+                    conn.execute(
+                        """
+                        INSERT INTO turns (turn_id, status, created_at)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(turn_id) DO UPDATE SET status = excluded.status
+                        """,
+                        (turn_key, turn_status, now)
+                    )
                 if event_type in ("PRIMARY_TOOL_DENIED", "STOP_REQUESTED"):
                     _push_metric_async(event_type, payload, now)
                 return True
             except sqlite3.IntegrityError:
                 return False
+
+    def sync_session_chars(self, session_id: str, total_chars: int):
+        now = time.time()
+        with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT total_session_chars, chars_since_refresh FROM session_stats WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    "INSERT INTO session_stats (session_id, total_session_chars, chars_since_refresh, updated_at) VALUES (?, ?, ?, ?)",
+                    (session_id, total_chars, total_chars, now),
+                )
+            else:
+                prev_total = row[0] or 0
+                prev_since = row[1] or 0
+                new_total = max(prev_total, total_chars)
+                delta = max(0, total_chars - prev_total)
+                conn.execute(
+                    "UPDATE session_stats SET total_session_chars = ?, chars_since_refresh = ?, updated_at = ? WHERE session_id = ?",
+                    (new_total, prev_since + delta, now, session_id),
+                )
+            conn.commit()
 
     def record_tool_chars(self, session_id: str, chars: int):
         now = time.time()

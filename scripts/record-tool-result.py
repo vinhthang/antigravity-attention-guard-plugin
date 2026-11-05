@@ -28,14 +28,42 @@ def main(argv=None, stdin=None, stdout=None):
         from common import get_turn_state
         turn_id, _ = get_turn_state(payload.get("transcriptPath", ""))
         step_idx = payload.get("stepIdx", 0)
-        error = payload.get("error")
-        if error:
-            event_type = Event.HANDOFF_FAILED.name
+
+        tool_name = payload.get("toolName") or payload.get("tool_name") or ""
+        if not tool_name:
+            tool_call = payload.get("toolCall") or payload.get("tool_call") or {}
+            if isinstance(tool_call, dict):
+                tool_name = tool_call.get("name") or ""
+
+        matched_step_idx = str(step_idx)
+        is_subagent_handoff = False
+        if tool_name in ("invoke_subagent", "default_api:invoke_subagent"):
+            is_subagent_handoff = True
+        elif tool_name in ("send_message", "default_api:send_message"):
             with ledger._get_connection() as conn:
-                conn.execute("UPDATE work_items SET status = 'FAILED' WHERE parent_conv_id = ? AND parent_turn_id = ? AND step_idx = ? AND status = 'ACTIVE'", (actor_id, str(turn_id), str(step_idx)))
-        else:
-            event_type = Event.HANDOFF_ACCEPTED.name
-        ledger.insert_event(actor_id, str(turn_id), "PostToolUse", str(step_idx), "invoke", event_type, json.dumps({"error": error}))
+                row = conn.execute(
+                    "SELECT work_id, step_idx FROM work_items WHERE parent_conv_id = ? AND parent_turn_id = ? AND status = 'ACTIVE' ORDER BY created_at DESC LIMIT 1",
+                    (actor_id, str(turn_id))
+                ).fetchone()
+                if row:
+                    is_subagent_handoff = True
+                    if row["step_idx"] is not None and str(row["step_idx"]):
+                        matched_step_idx = str(row["step_idx"])
+        elif not tool_name:
+            is_subagent_handoff = True
+
+        if is_subagent_handoff:
+            error = payload.get("error")
+            if error:
+                event_type = Event.HANDOFF_FAILED.name
+                with ledger._get_connection() as conn:
+                    conn.execute(
+                        "UPDATE work_items SET status = 'FAILED' WHERE parent_conv_id = ? AND parent_turn_id = ? AND (step_idx = ? OR status = 'ACTIVE') AND status = 'ACTIVE'",
+                        (actor_id, str(turn_id), str(matched_step_idx))
+                    )
+            else:
+                event_type = Event.HANDOFF_ACCEPTED.name
+            ledger.insert_event(actor_id, str(turn_id), "PostToolUse", str(matched_step_idx), "invoke", event_type, json.dumps({"error": error}))
         emit({})
     except Exception:
         emit({})

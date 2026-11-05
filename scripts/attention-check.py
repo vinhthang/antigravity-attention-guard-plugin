@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys, os, json, time
 sys.path.insert(0, os.path.dirname(__file__))
-from common import is_subagent, get_cache_dir, get_turn_state
+from common import is_subagent, get_cache_dir, get_turn_state, parse_transcript
 from ledger import Ledger
 from fsm import FSM, Event, State
 
@@ -123,25 +123,56 @@ def main(argv=None, stdin=None, stdout=None):
                 ledger.insert_event(parent_conv_id, str(parent_turn_id), "Stop", "0", conv_id, event_type, json.dumps({"child_id": conv_id, "all_work_terminal": all_work_terminal}))
             return emit({"decision": "allow"})
 
-        tracker = os.path.join(get_cache_dir(), f"violation_{conv_id}_{turn_id}")
+        tracker_watchdog = os.path.join(get_cache_dir(), f"violation_watchdog_{conv_id}_{turn_id}")
+        tracker_walkthrough = os.path.join(get_cache_dir(), f"violation_walkthrough_{conv_id}_{turn_id}")
+        parsed = parse_transcript(payload.get("transcriptPath", ""))
+        active_bg_tasks = parsed.get("active_bg_tasks") or []
+        active_timers = parsed.get("active_timers_since_wakeup") or []
+
         current_state = get_current_fsm_state(ledger, conv_id, turn_id)
 
+        try:
+            ledger.reconcile_orphaned_work_items(conv_id, str(turn_id))
+        except Exception as exc:
+            _ = exc
+
+        with ledger._get_connection() as conn:
+            cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status NOT IN ('COMPLETED', 'TERMINATED', 'DONE', 'FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
+            active_count = cursor.fetchone()[0]
+
+        if (active_count > 0 or len(active_bg_tasks) > 0) and len(active_timers) == 0 and os.environ.get("AGY_REQUIRE_WATCHDOG_ON_STOP", "1") != "0":
+            rejection_count = increment_rejection_count(tracker_watchdog)
+            if rejection_count < MAX_STOP_REJECTIONS:
+                ledger.insert_event(conv_id, str(turn_id), "Stop", f"reject_{rejection_count}", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": True, "missing_watchdog": True}))
+                return emit({
+                    "decision": "continue",
+                    "reason": f"Attention Guard Watchdog Gate: Active asynchronous work detected (active subagents: {active_count}, active background tasks: {len(active_bg_tasks)}) without an active 300s schedule watchdog timer since the last wakeup. You MUST arm schedule(DurationSeconds=300, TimerCondition=\"any\", Prompt=\"...\") before ending your turn, or terminate hung subagents/tasks via manage_subagents(Action=\"kill\") / manage_task(Action=\"kill\")."
+                })
+            else:
+                reset_rejection_count(tracker_watchdog)
+                if active_count == 0 and current_state in (State.OPEN, State.CLOSED, State.REVIEWING):
+                    ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False, "bypass": "max_rejections"}))
+                    ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
+                return emit({"decision": "allow", "reason": "Max stop rejections exceeded for watchdog gate."})
+
         if current_state in (State.OPEN, State.CLOSED):
+            if active_count > 0:
+                # Active subagent work exists with watchdog armed; allow turn so Primary agent can wait for subagent response
+                reset_rejection_count(tracker_watchdog)
+                reset_rejection_count(tracker_walkthrough)
+                return emit({"decision": "allow"})
             ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False}))
             ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
-            reset_rejection_count(tracker)
+            reset_rejection_count(tracker_watchdog)
+            reset_rejection_count(tracker_walkthrough)
             return emit({"decision": "allow"})
 
         if current_state == State.HANDOFF_PENDING:
-            reset_rejection_count(tracker)
+            reset_rejection_count(tracker_watchdog)
+            reset_rejection_count(tracker_walkthrough)
             return emit({"decision": "allow"})
 
         if current_state in (State.EXECUTION_ACTIVE, State.REVIEWING):
-            try:
-                ledger.reconcile_orphaned_work_items(conv_id, str(turn_id))
-            except Exception as exc:
-                sys.stderr.write(f"Warning in reconcile_orphaned_work_items: {exc}\n")
-
             with ledger._get_connection() as conn:
                 cursor = conn.execute("SELECT COUNT(*) FROM work_items WHERE status NOT IN ('COMPLETED', 'TERMINATED', 'DONE', 'FAILED', 'TIMED_OUT') AND parent_conv_id = ? AND parent_turn_id = ?", (conv_id, str(turn_id)))
                 active_count = cursor.fetchone()[0]
@@ -166,9 +197,9 @@ def main(argv=None, stdin=None, stdout=None):
                             except (ValueError, TypeError) as conv_err:
                                 _ = conv_err
                     if not check_walkthrough_requirement(payload, conv_id, min_mtime=min_mtime):
-                        rejection_count = increment_rejection_count(tracker)
+                        rejection_count = increment_rejection_count(tracker_walkthrough)
                         if rejection_count >= MAX_STOP_REJECTIONS:
-                            reset_rejection_count(tracker)
+                            reset_rejection_count(tracker_walkthrough)
                             return emit({"decision": "allow"})
                         return emit({
                             "decision": "continue",
@@ -178,25 +209,29 @@ def main(argv=None, stdin=None, stdout=None):
                         ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.WORK_TERMINATED_OK.name, json.dumps({"all_work_terminal": True}))
                     ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False}))
                     ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
-                    reset_rejection_count(tracker)
+                    reset_rejection_count(tracker_watchdog)
+                    reset_rejection_count(tracker_walkthrough)
                     return emit({"decision": "allow"})
                 else:
                     ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.WORK_TIMED_OUT.name, json.dumps({"reason": "Orphaned work timed out"}))
                     current_state = State.RECOVERY_REQUIRED
             elif active_count > 0:
-                # Primary agent has active subagent work running in background.
+                # Primary agent has active subagent work running in background with watchdog armed.
                 # Allow turn to finish so Primary agent can wait for asynchronous subagent response.
-                reset_rejection_count(tracker)
+                reset_rejection_count(tracker_watchdog)
+                reset_rejection_count(tracker_walkthrough)
                 return emit({"decision": "allow"})
             else:
                 if current_state == State.REVIEWING:
                     ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False}))
                     ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
-                reset_rejection_count(tracker)
+                reset_rejection_count(tracker_watchdog)
+                reset_rejection_count(tracker_walkthrough)
                 return emit({"decision": "allow"})
 
         if current_state == State.RECOVERY_REQUIRED:
-            reset_rejection_count(tracker)
+            reset_rejection_count(tracker_watchdog)
+            reset_rejection_count(tracker_walkthrough)
             ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.STOP_REQUESTED.name, json.dumps({"active_work": False, "recovery_handled": True}))
             ledger.insert_event(conv_id, str(turn_id), "Stop", "0", "self", Event.TURN_CLOSED.name, json.dumps({}))
             return emit({"decision": "allow"})

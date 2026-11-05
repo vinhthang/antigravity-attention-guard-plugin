@@ -641,6 +641,100 @@ def main(argv=None, stdin=None, stdout=None):
                         sys.stderr.write(f"Warning in manage_subagents kill_all: {exc}\n")
                     return emit({"decision": "allow"})
 
+            if tool_name in ["send_message", "default_api:send_message"]:
+                raw_rec = args.get("Recipient") if args.get("Recipient") is not None else args.get("recipient")
+                recipient = str(raw_rec or "").strip()
+                if recipient.startswith('"') and recipient.endswith('"') and len(recipient) >= 2:
+                    try:
+                        decoded_rec = json.loads(recipient)
+                        if isinstance(decoded_rec, str):
+                            recipient = decoded_rec.strip()
+                    except Exception as dec_err:
+                        _ = dec_err
+                        recipient = recipient[1:-1].strip()
+
+                msg_val = args.get("Message") if args.get("Message") is not None else args.get("message")
+                msg_str = str(msg_val or "").strip()
+                if msg_str.startswith('"') and msg_str.endswith('"') and len(msg_str) >= 2:
+                    try:
+                        decoded_msg = json.loads(msg_str)
+                        if isinstance(decoded_msg, str):
+                            msg_str = decoded_msg.strip()
+                        elif isinstance(decoded_msg, dict):
+                            msg_str = json.dumps(decoded_msg)
+                    except Exception as msg_err:
+                        _ = msg_err
+
+                is_valid_payload = False
+                if recipient:
+                    if os.environ.get("AGY_DISABLE_JSON_GATE") == "1":
+                        is_valid_payload = True
+                    else:
+                        try:
+                            parsed_msg = json.loads(msg_str) if isinstance(msg_str, str) else msg_str
+                            if isinstance(parsed_msg, dict):
+                                is_valid_payload = True
+                        except (json.JSONDecodeError, ValueError) as json_err:
+                            _ = json_err
+                            is_valid_payload = False
+                if is_valid_payload:
+                    now = time.time()
+                    turn_id, _ = get_turn_state(data.get("transcriptPath", ""))
+                    conv_id = data.get("conversationId", "unknown")
+                    step_idx = data.get("stepIdx", 0)
+                    with ledger._get_connection() as conn:
+                        row = conn.execute(
+                            """
+                            SELECT w.work_id
+                            FROM work_items w
+                            LEFT JOIN tokens t ON w.work_id = t.token_id
+                            WHERE (t.claimed_by = ? OR t.token_id = ? OR w.work_id = ?)
+                              AND w.parent_conv_id = ?
+                              AND ? != ?
+                            ORDER BY w.created_at DESC LIMIT 1
+                            """,
+                            (recipient, recipient, recipient, conv_id, recipient, conv_id)
+                        ).fetchone()
+
+                        if row and row[0]:
+                            work_id = row[0]
+                        elif os.environ.get("AGY_ALLOW_UNSEEDED_SEND_MESSAGE") == "1":
+                            work_id = recipient
+                            conn.execute(
+                                "INSERT INTO tokens (token_id, claimed, claimed_by, created_at) VALUES (?, 1, ?, ?) "
+                                "ON CONFLICT(token_id) DO UPDATE SET claimed = 1, claimed_by = excluded.claimed_by",
+                                (recipient, recipient, now)
+                            )
+                        else:
+                            # Recipient is not a known subagent of this conversation; allow plain send_message without tracking as handoff
+                            return emit({"decision": "allow"})
+                        conn.execute(
+                            """
+                            INSERT INTO work_items (work_id, status, created_at, updated_at, parent_conv_id, parent_turn_id, step_idx)
+                            VALUES (?, 'ACTIVE', ?, ?, ?, ?, ?)
+                            ON CONFLICT(work_id) DO UPDATE SET
+                                status = 'ACTIVE',
+                                updated_at = excluded.updated_at,
+                                parent_conv_id = excluded.parent_conv_id,
+                                parent_turn_id = excluded.parent_turn_id,
+                                step_idx = excluded.step_idx
+                            """,
+                            (work_id, now, now, conv_id, str(turn_id), str(step_idx))
+                        )
+                        conn.commit()
+                    ledger.insert_event(
+                        conv_id, str(turn_id), "PreToolUse", str(step_idx), work_id, "WORK_PREPARED",
+                        json.dumps({
+                            "token": work_id,
+                            "recipient": recipient,
+                            "tool": "invoke",
+                            "valid_handoff": True,
+                            "parent_conv_id": conv_id,
+                            "parent_turn_id": str(turn_id),
+                        })
+                    )
+                    return emit({"decision": "allow"})
+
             transcript_path = data.get("transcriptPath", "")
             artifact_dir = data.get("artifactDirectoryPath") or data.get("artifact_dir")
             if not artifact_dir:
@@ -677,6 +771,17 @@ def main(argv=None, stdin=None, stdout=None):
             return emit({"decision": "allow"})
 
         if is_sub:
+            if tool_name in ["send_message", "default_api:send_message"]:
+                parsed = parse_transcript(data.get("transcriptPath", ""))
+                active_bg = parsed.get("active_bg_tasks") or []
+                if active_bg:
+                    bg_ids = ", ".join(active_bg)
+                    return emit_deny(
+                        f"Attention Guard: Cannot call send_message while background command task(s) are still running: {bg_ids}. "
+                        f"Wait for each background task's <SYSTEM_MESSAGE> completion notification (by ending your turn) "
+                        f"or explicitly terminate it via manage_task(Action=\"kill\", TaskId=\"...\") before reporting completion. "
+                        f"Never fabricate <system_message> blocks."
+                    )
             if tool_name in ["invoke_subagent", "manage_subagents", "default_api:invoke_subagent", "default_api:manage_subagents"]:
                 if not may_delegate or remaining_depth <= 0:
                     return emit_deny("Attention Dilution Guard: Subagents are forbidden from delegating tasks further. Do not invoke or manage subagents.")

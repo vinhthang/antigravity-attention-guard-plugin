@@ -47,6 +47,18 @@
         "stderr_summary": { "type": "string" },
         "signal_name": { "type": "string" }
       }
+    },
+    "red_evidence": {
+      "type": ["object", "string", "null"]
+    },
+    "per_module_totals": {
+      "type": ["object", "string", "null"]
+    },
+    "main_diff_stat": {
+      "type": ["string", "null"]
+    },
+    "notes": {
+      "type": ["string", "null", "array"]
     }
   },
   "if": {

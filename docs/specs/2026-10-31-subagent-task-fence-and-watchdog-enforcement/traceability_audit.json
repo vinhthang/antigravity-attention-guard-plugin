@@ -1,63 +1,120 @@
 {
-  "spec_hash": "9190b03904570abb8e25fcb97a122fb73777aaf703fd42ec887ee025e2a4480a",
-  "auditor_model": "claude-opus-4-6",
+  "spec_hash": "8a4e4850e6360d461c0bde96013292f278afb0aeda8c0e8944722fb749af3182",
+  "evidence_hash": "44f834da6fe7a5ed5cc85dfc2f22277f300f5a44f8269dc05c021b0857cc711d",
+  "auditor_model": "gemini-4-argon-high",
   "verdict": "PASS",
   "requirements_evaluated": {
     "REQ-027": {
       "design_aligned": true,
-      "design_rationale": "Sections 1, 2.1, and 2.2 define active_bg_tasks extraction in scripts/common.py (excluding Timer:/Cron: and IsDaemon: true, clearing only on SYSTEM SYSTEM_MESSAGE completion/cancellation or GENERIC cancellation), the PreToolUse subagent send_message fence in scripts/enforce-delegation.py, and the Background Task Completion Fence rule in rules/EXECUTOR.md.",
+      "design_rationale": "Section 1 maps REQ-027 to scripts/common.py, scripts/enforce-delegation.py, and rules/EXECUTOR.md. Section 2.1 defines transcript parsing of active_bg_tasks from GENERIC steps, excluding daemon tasks (checked via preceding PLANNER_RESPONSE run_command tool calls) and timer tasks, and clearing tasks only on genuine SYSTEM SYSTEM_MESSAGE completion/cancellation or GENERIC cancellation. Section 2.2 defines the PreToolUse intercept in enforce-delegation.py for subagents (is_sub == True) calling send_message/default_api:send_message, returning a structured deny when active_bg_tasks is non-empty, and updating rules/EXECUTOR.md to forbid synthetic system_message blocks.",
       "tasks_actionable": true,
-      "tasks_rationale": "Task 1 (parse_transcript in scripts/common.py), Task 2 (enforce-delegation.py and rules/EXECUTOR.md), and Task 5 (TDD regression tests in tests/test_ledger_performance.py) provide falsifiable steps for REQ-027.",
+      "tasks_rationale": "Task 1 implements active_bg_tasks parsing in scripts/common.py; Task 2 updates scripts/enforce-delegation.py to deny send_message when active_bg_tasks is non-empty and adds the Background Task Completion Fence constraint to rules/EXECUTOR.md; Task 7 adds unit and E2E regression tests.",
       "decisions_consistent": true,
       "architecturally_sound": true,
-      "debate_rationale": "ADR-001 evaluates trade-offs (blocking intermediate send_message while non-daemon background tasks run, excluding IsDaemon: true) and rejected alternatives (prompt-only rules, subprocess RPC) while preserving module cohesion and encapsulation."
+      "debate_rationale": "ADR-001 thoroughly debates the trade-offs and risks: subagent completion messages are strictly terminal under the executor data contract, so blocking send_message during non-daemon background execution prevents waiting_for_dependents hangs. Daemon processes are explicitly excluded via IsDaemon inspection. Prompt-only governance was rejected due to flash hallucination risks; subprocess querying of manage_task was rejected as hooks lack runtime RPC access.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 records tests/test_ledger_performance.py::test_req_027_subagent_task_fence_on_send_message PASSED. Confirms enforce-delegation.py denies subagent send_message while background tasks are active, synthetic <system_message> tags fail to clear active_bg_tasks, and genuine SYSTEM SYSTEM_MESSAGE events clear tasks to allow send_message."
     },
     "REQ-028": {
       "design_aligned": true,
-      "design_rationale": "Sections 1, 2.1, and 2.3 specify work_items reactivation/upsert and WORK_PREPARED/HANDOFF_ACCEPTED emission on Primary Agent send_message in scripts/enforce-delegation.py and scripts/record-tool-result.py (with hooks.json matcher update), dynamic parent_turn_id resolution in scripts/common.py (is_subagent), active_timers_since_wakeup tracking, and the 300s watchdog timer gate in scripts/attention-check.py.",
+      "design_rationale": "Section 1 maps REQ-028 to scripts/common.py, scripts/enforce-delegation.py, scripts/record-tool-result.py, hooks.json, and scripts/attention-check.py. Section 2.1 defines active_timers_since_wakeup tracking reset on USER_INPUT and SYSTEM_MESSAGE wakeups. Section 2.3 specifies upserting work_items (status='ACTIVE', parent_conv_id, parent_turn_id, step_idx) and recording WORK_PREPARED/HANDOFF_ACCEPTED on Primary Agent send_message re-dispatch, updating hooks.json matcher to 'invoke_subagent|send_message', dynamically resolving parent turn in is_subagent() with one-shot WORK_CLAIMED/RUNNING, and verifying active 300s schedule watchdog timers in scripts/attention-check.py on Stop.",
       "tasks_actionable": true,
-      "tasks_rationale": "Task 1 (scripts/common.py), Task 3 (scripts/enforce-delegation.py, scripts/record-tool-result.py, hooks.json, scripts/attention-check.py), and Task 5 (TDD regression tests in tests/test_ledger_performance.py) map directly to REQ-028.",
+      "tasks_rationale": "Task 1 implements active_timers_since_wakeup tracking and dynamic parent turn resolution in scripts/common.py; Task 3 implements work_items reactivation on send_message, hooks.json matcher updates, and the 300s schedule watchdog Stop gate in scripts/attention-check.py; Task 7 provides test coverage.",
       "decisions_consistent": true,
       "architecturally_sound": true,
-      "debate_rationale": "ADR-002 evaluates trade-offs (scoping watchdog check to turns with delegation or active_bg_tasks for backward compatibility with bare SQLite unit fixtures) and rejected alternatives (spawning timers inside Stop hooks) without arbitrary file size caps."
+      "debate_rationale": "ADR-002 evaluates risks of false-positive Stop rejections in synthetic unit tests without transcript steps, mitigating this by gating on non-empty active_bg_tasks or presence of tool calls in the transcript's current turn (or AGY_FORCE_WATCHDOG_CHECK). Automatically spawning timers inside hooks was rejected because Stop hooks cannot invoke runtime tools.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 records tests/test_ledger_performance.py::test_req_028_send_message_redispatch_and_watchdog_gate PASSED. Confirms send_message reactivates work_items with new parent turn/step metadata, emits WORK_PREPARED and HANDOFF_ACCEPTED events, and attention-check.py enforces 300s schedule watchdog timer gate before allowing Primary Agent Stop."
     },
     "REQ-029": {
       "design_aligned": true,
-      "design_rationale": "Sections 1 and 2.4 specify stripping trailing punctuation and skipping lexical /.gemini/ paths before Path.resolve() in extract_prompt_workspaces() within spec-gate.py.",
+      "design_rationale": "Section 1 maps REQ-029 to spec-gate.py in spec-driven-plugin. Section 2.4 specifies modifying extract_prompt_workspaces() to strip trailing punctuation and lexically inspect path candidates for '/.gemini/' or Path.home() / '.gemini' before resolving symlinks, preventing read-only references to plugin schemas and tools from triggering false-positive spec-gate rejections on plugin git repos.",
       "tasks_actionable": true,
-      "tasks_rationale": "Task 4 (spec-gate.py extract_prompt_workspaces update) and Task 5 (TDD regression tests in tests/test_ledger_performance.py) provide concrete, falsifiable tasks for REQ-029.",
+      "tasks_rationale": "Task 4 updates extract_prompt_workspaces() in /Users/thanghoang/.gemini/config/plugins/spec-driven-plugin/scripts/spec-gate.py to exclude lexical ~/.gemini/ paths prior to symlink resolution; Task 7 adds unit and regression tests.",
       "decisions_consistent": true,
       "architecturally_sound": true,
-      "debate_rationale": "ADR-003 evaluates trade-offs (lexical ~/.gemini/ exclusion in prompt extraction while keeping symlink resolution on direct file mutation tools) and rejected alternatives (any-workspace pass policy)."
+      "debate_rationale": "ADR-003 analyzes the risk of developers attempting to mutate plugin code via ~/.gemini/ symlinks and confirms that direct file mutation tools (edit_file, write_file) continue to resolve paths and enforce specification gates independently. Allowing prompts if any workspace has a valid spec was rejected to maintain rigorous multi-repo validation.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 records tests/test_ledger_performance.py::test_req_029_extract_prompt_workspaces_gemini_symlink_exclusion PASSED and Section 3 records 60 passing tests across spec-driven-plugin test suite. Confirms extract_prompt_workspaces ignores lexical /.gemini/ plugin paths and strips punctuation, eliminating false-positive spec gate rejections."
+    },
+    "REQ-031": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-031 to scripts/common.py, scripts/attention-refresh.py, and scripts/ledger.py. Section 2.1 specifies computing active_context_chars from content and tool_calls (excluding thinking fields and resetting on COMPACTION steps) and setting has_valid_json_steps. Section 2.5 defines Ledger.sync_session_chars(), upserting (actor_id_turn_id, status, now) into SQLite turns on WORK_PREPARED, STOP_REQUESTED, and TURN_CLOSED events, pruning closed turns, and updating attention-refresh.py to calculate total_tokens = active_context_chars // 4 with raw file-size fallback for non-JSONL test fixtures.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 1 implements active_context_chars and has_valid_json_steps in scripts/common.py; Task 5 updates scripts/ledger.py (sync_session_chars, turns lifecycle upsert and prune) and scripts/attention-refresh.py; Task 7 adds unit and performance tests.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-004 addresses the 190x token inflation root cause. Trade-off of string summation overhead is mitigated by existing single-pass mtime/size transcript caching. Attaching record-tool-result.py to all tool calls was rejected due to subprocess latency; dropping the turns table was rejected because turns provides fast indexed turn lifecycle status without full event replays.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 records tests/test_ledger_performance.py::test_req_031_ledger_turns_lifecycle_and_prune PASSED and tests/test_attention_refresh.py::test_req_031_active_context_chars_and_refresh_calculation PASSED. Section 5.1 records 100.0% mutation kill rate on scripts/attention-refresh.py. Confirms content-grounded token calculations and SQLite turns lifecycle management."
+    },
+    "REQ-032": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-032 to scripts/surface_validator.py and rules/google-cloud-discovery.md. Section 2.6 introduces _resolve_autotrigger_target() to select the first sorted rules/*.md file when rules/AGENTS.md is absent in tree, applies this in autotrigger() and validate_plugin_surface(repair_triggers=True), and adds the 4 bundled skill triggers to rules/google-cloud-discovery.md so scripts/system_audit.py passes with 0 errors.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 6 updates autotrigger() and validate_plugin_surface() in scripts/surface_validator.py to fall back to the first rules/*.md file, repairs google-cloud-discovery.md, and verifies scripts/system_audit.py; Task 7 provides test coverage.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-005 considers the disk mutation risk on installed marketplace plugin files and mitigates it by making autotrigger generic and repeatable. Hardcoding an exclusion for google-cloud-developer in system_audit.py was rejected to uphold uniform skill discoverability across all plugins.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 records tests/test_surface_validator.py::test_req_032_autotrigger_custom_rule_file_fallback PASSED; Section 4 records system_audit.py passing with Overall Valid: True, Total Errors: 0; Section 5.2 records 93.8% mutation kill rate on scripts/surface_validator.py."
     }
   },
   "requirements": {
     "REQ-027": {
       "design_aligned": true,
-      "design_rationale": "Sections 1, 2.1, and 2.2 define active_bg_tasks extraction in scripts/common.py (excluding Timer:/Cron: and IsDaemon: true, clearing only on SYSTEM SYSTEM_MESSAGE completion/cancellation or GENERIC cancellation), the PreToolUse subagent send_message fence in scripts/enforce-delegation.py, and the Background Task Completion Fence rule in rules/EXECUTOR.md.",
+      "design_rationale": "Section 1 maps REQ-027 to scripts/common.py, scripts/enforce-delegation.py, and rules/EXECUTOR.md. Section 2.1 defines transcript parsing of active_bg_tasks from GENERIC steps, excluding daemon tasks (checked via preceding PLANNER_RESPONSE run_command tool calls) and timer tasks, and clearing tasks only on genuine SYSTEM SYSTEM_MESSAGE completion/cancellation or GENERIC cancellation. Section 2.2 defines the PreToolUse intercept in enforce-delegation.py for subagents (is_sub == True) calling send_message/default_api:send_message, returning a structured deny when active_bg_tasks is non-empty, and updating rules/EXECUTOR.md to forbid synthetic system_message blocks.",
       "tasks_actionable": true,
-      "tasks_rationale": "Task 1 (parse_transcript in scripts/common.py), Task 2 (enforce-delegation.py and rules/EXECUTOR.md), and Task 5 (TDD regression tests in tests/test_ledger_performance.py) provide falsifiable steps for REQ-027.",
+      "tasks_rationale": "Task 1 implements active_bg_tasks parsing in scripts/common.py; Task 2 updates scripts/enforce-delegation.py to deny send_message when active_bg_tasks is non-empty and adds the Background Task Completion Fence constraint to rules/EXECUTOR.md; Task 7 adds unit and E2E regression tests.",
       "decisions_consistent": true,
       "architecturally_sound": true,
-      "debate_rationale": "ADR-001 evaluates trade-offs (blocking intermediate send_message while non-daemon background tasks run, excluding IsDaemon: true) and rejected alternatives (prompt-only rules, subprocess RPC) while preserving module cohesion and encapsulation."
+      "debate_rationale": "ADR-001 thoroughly debates the trade-offs and risks: subagent completion messages are strictly terminal under the executor data contract, so blocking send_message during non-daemon background execution prevents waiting_for_dependents hangs. Daemon processes are explicitly excluded via IsDaemon inspection. Prompt-only governance was rejected due to flash hallucination risks; subprocess querying of manage_task was rejected as hooks lack runtime RPC access.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 records tests/test_ledger_performance.py::test_req_027_subagent_task_fence_on_send_message PASSED. Confirms enforce-delegation.py denies subagent send_message while background tasks are active, synthetic <system_message> tags fail to clear active_bg_tasks, and genuine SYSTEM SYSTEM_MESSAGE events clear tasks to allow send_message."
     },
     "REQ-028": {
       "design_aligned": true,
-      "design_rationale": "Sections 1, 2.1, and 2.3 specify work_items reactivation/upsert and WORK_PREPARED/HANDOFF_ACCEPTED emission on Primary Agent send_message in scripts/enforce-delegation.py and scripts/record-tool-result.py (with hooks.json matcher update), dynamic parent_turn_id resolution in scripts/common.py (is_subagent), active_timers_since_wakeup tracking, and the 300s watchdog timer gate in scripts/attention-check.py.",
+      "design_rationale": "Section 1 maps REQ-028 to scripts/common.py, scripts/enforce-delegation.py, scripts/record-tool-result.py, hooks.json, and scripts/attention-check.py. Section 2.1 defines active_timers_since_wakeup tracking reset on USER_INPUT and SYSTEM_MESSAGE wakeups. Section 2.3 specifies upserting work_items (status='ACTIVE', parent_conv_id, parent_turn_id, step_idx) and recording WORK_PREPARED/HANDOFF_ACCEPTED on Primary Agent send_message re-dispatch, updating hooks.json matcher to 'invoke_subagent|send_message', dynamically resolving parent turn in is_subagent() with one-shot WORK_CLAIMED/RUNNING, and verifying active 300s schedule watchdog timers in scripts/attention-check.py on Stop.",
       "tasks_actionable": true,
-      "tasks_rationale": "Task 1 (scripts/common.py), Task 3 (scripts/enforce-delegation.py, scripts/record-tool-result.py, hooks.json, scripts/attention-check.py), and Task 5 (TDD regression tests in tests/test_ledger_performance.py) map directly to REQ-028.",
+      "tasks_rationale": "Task 1 implements active_timers_since_wakeup tracking and dynamic parent turn resolution in scripts/common.py; Task 3 implements work_items reactivation on send_message, hooks.json matcher updates, and the 300s schedule watchdog Stop gate in scripts/attention-check.py; Task 7 provides test coverage.",
       "decisions_consistent": true,
       "architecturally_sound": true,
-      "debate_rationale": "ADR-002 evaluates trade-offs (scoping watchdog check to turns with delegation or active_bg_tasks for backward compatibility with bare SQLite unit fixtures) and rejected alternatives (spawning timers inside Stop hooks) without arbitrary file size caps."
+      "debate_rationale": "ADR-002 evaluates risks of false-positive Stop rejections in synthetic unit tests without transcript steps, mitigating this by gating on non-empty active_bg_tasks or presence of tool calls in the transcript's current turn (or AGY_FORCE_WATCHDOG_CHECK). Automatically spawning timers inside hooks was rejected because Stop hooks cannot invoke runtime tools.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 records tests/test_ledger_performance.py::test_req_028_send_message_redispatch_and_watchdog_gate PASSED. Confirms send_message reactivates work_items with new parent turn/step metadata, emits WORK_PREPARED and HANDOFF_ACCEPTED events, and attention-check.py enforces 300s schedule watchdog timer gate before allowing Primary Agent Stop."
     },
     "REQ-029": {
       "design_aligned": true,
-      "design_rationale": "Sections 1 and 2.4 specify stripping trailing punctuation and skipping lexical /.gemini/ paths before Path.resolve() in extract_prompt_workspaces() within spec-gate.py.",
+      "design_rationale": "Section 1 maps REQ-029 to spec-gate.py in spec-driven-plugin. Section 2.4 specifies modifying extract_prompt_workspaces() to strip trailing punctuation and lexically inspect path candidates for '/.gemini/' or Path.home() / '.gemini' before resolving symlinks, preventing read-only references to plugin schemas and tools from triggering false-positive spec-gate rejections on plugin git repos.",
       "tasks_actionable": true,
-      "tasks_rationale": "Task 4 (spec-gate.py extract_prompt_workspaces update) and Task 5 (TDD regression tests in tests/test_ledger_performance.py) provide concrete, falsifiable tasks for REQ-029.",
+      "tasks_rationale": "Task 4 updates extract_prompt_workspaces() in /Users/thanghoang/.gemini/config/plugins/spec-driven-plugin/scripts/spec-gate.py to exclude lexical ~/.gemini/ paths prior to symlink resolution; Task 7 adds unit and regression tests.",
       "decisions_consistent": true,
       "architecturally_sound": true,
-      "debate_rationale": "ADR-003 evaluates trade-offs (lexical ~/.gemini/ exclusion in prompt extraction while keeping symlink resolution on direct file mutation tools) and rejected alternatives (any-workspace pass policy)."
+      "debate_rationale": "ADR-003 analyzes the risk of developers attempting to mutate plugin code via ~/.gemini/ symlinks and confirms that direct file mutation tools (edit_file, write_file) continue to resolve paths and enforce specification gates independently. Allowing prompts if any workspace has a valid spec was rejected to maintain rigorous multi-repo validation.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 records tests/test_ledger_performance.py::test_req_029_extract_prompt_workspaces_gemini_symlink_exclusion PASSED and Section 3 records 60 passing tests across spec-driven-plugin test suite. Confirms extract_prompt_workspaces ignores lexical /.gemini/ plugin paths and strips punctuation, eliminating false-positive spec gate rejections."
+    },
+    "REQ-031": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-031 to scripts/common.py, scripts/attention-refresh.py, and scripts/ledger.py. Section 2.1 specifies computing active_context_chars from content and tool_calls (excluding thinking fields and resetting on COMPACTION steps) and setting has_valid_json_steps. Section 2.5 defines Ledger.sync_session_chars(), upserting (actor_id_turn_id, status, now) into SQLite turns on WORK_PREPARED, STOP_REQUESTED, and TURN_CLOSED events, pruning closed turns, and updating attention-refresh.py to calculate total_tokens = active_context_chars // 4 with raw file-size fallback for non-JSONL test fixtures.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 1 implements active_context_chars and has_valid_json_steps in scripts/common.py; Task 5 updates scripts/ledger.py (sync_session_chars, turns lifecycle upsert and prune) and scripts/attention-refresh.py; Task 7 adds unit and performance tests.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-004 addresses the 190x token inflation root cause. Trade-off of string summation overhead is mitigated by existing single-pass mtime/size transcript caching. Attaching record-tool-result.py to all tool calls was rejected due to subprocess latency; dropping the turns table was rejected because turns provides fast indexed turn lifecycle status without full event replays.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 records tests/test_ledger_performance.py::test_req_031_ledger_turns_lifecycle_and_prune PASSED and tests/test_attention_refresh.py::test_req_031_active_context_chars_and_refresh_calculation PASSED. Section 5.1 records 100.0% mutation kill rate on scripts/attention-refresh.py. Confirms content-grounded token calculations and SQLite turns lifecycle management."
+    },
+    "REQ-032": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-032 to scripts/surface_validator.py and rules/google-cloud-discovery.md. Section 2.6 introduces _resolve_autotrigger_target() to select the first sorted rules/*.md file when rules/AGENTS.md is absent in tree, applies this in autotrigger() and validate_plugin_surface(repair_triggers=True), and adds the 4 bundled skill triggers to rules/google-cloud-discovery.md so scripts/system_audit.py passes with 0 errors.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 6 updates autotrigger() and validate_plugin_surface() in scripts/surface_validator.py to fall back to the first rules/*.md file, repairs google-cloud-discovery.md, and verifies scripts/system_audit.py; Task 7 provides test coverage.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-005 considers the disk mutation risk on installed marketplace plugin files and mitigates it by making autotrigger generic and repeatable. Hardcoding an exclusion for google-cloud-developer in system_audit.py was rejected to uphold uniform skill discoverability across all plugins.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 records tests/test_surface_validator.py::test_req_032_autotrigger_custom_rule_file_fallback PASSED; Section 4 records system_audit.py passing with Overall Valid: True, Total Errors: 0; Section 5.2 records 93.8% mutation kill rate on scripts/surface_validator.py."
     }
   }
 }

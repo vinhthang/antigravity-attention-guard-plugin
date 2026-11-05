@@ -114,7 +114,8 @@ def skill_names(surface: PluginSurfaceSpec, tree: dict[str, str]) -> list[str]:
 
 def extract_frontmatter(content: str) -> dict[str, str]:
     """
-    Extracts key-value pairs from YAML frontmatter between ^--- and ^---.
+    Extracts key-value pairs from YAML frontmatter between ^--- and ^---,
+    supporting multiline block scalars (>- , >, |, |-) and indented continuation lines.
     """
     if not content.startswith("---"):
         return {}
@@ -123,16 +124,48 @@ def extract_frontmatter(content: str) -> dict[str, str]:
         return {}
     fm_text = parts[1]
     res: dict[str, str] = {}
-    for line in fm_text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
+    current_key = None
+    multiline_buf: list[str] = []
+
+    def flush_multiline():
+        nonlocal current_key, multiline_buf
+        if current_key and multiline_buf:
+            val = " ".join(l.strip() for l in multiline_buf if l.strip())
+            res[current_key] = val
+            multiline_buf = []
+            current_key = None
+
+    for raw_line in fm_text.splitlines():
+        if not raw_line.strip() or raw_line.strip().startswith("#"):
             continue
-        if ":" in line:
-            k, v = line.split(":", 1)
+        # Check if line is a top-level key (starts without leading whitespace)
+        if raw_line and not raw_line[0].isspace() and ":" in raw_line:
+            flush_multiline()
+            k, v = raw_line.split(":", 1)
             k = k.strip()
             v = v.strip().strip("\"'")
-            res[k] = v
+            if v in (">-", ">", "|", "|-"):
+                current_key = k
+                multiline_buf = []
+            else:
+                res[k] = v
+        elif current_key and raw_line and raw_line[0].isspace():
+            multiline_buf.append(raw_line.strip())
+        else:
+            flush_multiline()
+
+    flush_multiline()
     return res
+
+
+def _resolve_autotrigger_target(surface: PluginSurfaceSpec, tree: dict[str, str]) -> str:
+    """Resolve autotrigger file target, falling back to first sorted rules/*.md if autotrigger_file is absent."""
+    if surface.autotrigger_file in tree:
+        return surface.autotrigger_file
+    rule_files = sorted(p for p in tree if p.startswith("rules/") and p.endswith(".md"))
+    if rule_files:
+        return rule_files[0]
+    return surface.autotrigger_file
 
 
 def autotrigger(
@@ -145,7 +178,7 @@ def autotrigger(
     For each skill in skill_names(surface, tree), if name is not mentioned in any
     rules/*.md in tree, extract description: from skills/<name>/SKILL.md frontmatter
     and append surface.trigger_line.format(name=name, desc=desc) to
-    tree[surface.autotrigger_file] (before </instructions> if present, else at the end)
+    the resolved autotrigger file (before </instructions> if present, else at the end)
     provided len(always_on_text) + len(line) <= cap. Return list of repaired skill names.
     """
     cap = always_on_max if always_on_max is not None else surface.always_on_max
@@ -168,7 +201,7 @@ def autotrigger(
         if not trigger.endswith("\n"):
             trigger += "\n"
 
-        target_file = surface.autotrigger_file
+        target_file = _resolve_autotrigger_target(surface, tree)
         orig_text = tree.get(target_file, "")
 
         if "</instructions>" in orig_text:
@@ -308,12 +341,13 @@ def validate_plugin_surface(
     # Optional trigger auto-repair
     if repair_triggers:
         repaired = autotrigger(surface, tree, always_on_max=cap)
-        if repaired and surface.autotrigger_file in tree:
-            target_path = pdir / surface.autotrigger_file
+        target_file = _resolve_autotrigger_target(surface, tree)
+        if repaired and target_file in tree:
+            target_path = pdir / target_file
             try:
-                target_path.write_text(tree[surface.autotrigger_file], encoding="utf-8")
+                target_path.write_text(tree[target_file], encoding="utf-8")
             except Exception as e:
-                errs.append(f"Failed to write repaired triggers to '{surface.autotrigger_file}': {e}")
+                errs.append(f"Failed to write repaired triggers to '{target_file}': {e}")
 
     # 1. Always-on budget check
     aon = always_on_text(surface, tree)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys, os, json
 sys.path.insert(0, os.path.dirname(__file__))
-from common import is_subagent
+from common import is_subagent, parse_transcript
 from ledger import Ledger
 
 PRIMARY_RULES_REMINDER = """⚡ Attention Guard Reminder (Turn Refresh):
@@ -149,7 +149,13 @@ def main(argv=None, stdin=None, stdout=None):
         total_tokens = 0
         if transcript_path and os.path.exists(transcript_path):
             try:
-                total_tokens = os.path.getsize(transcript_path) // 4
+                parsed = parse_transcript(transcript_path)
+                if parsed.get("has_valid_json_steps"):
+                    active_chars = parsed.get("active_context_chars", 0)
+                    total_tokens = active_chars // 4
+                    ledger.sync_session_chars(session_id, active_chars)
+                else:
+                    total_tokens = os.path.getsize(transcript_path) // 4
             except Exception as exc:
                 _ = exc
                 total_tokens = 0
@@ -158,6 +164,9 @@ def main(argv=None, stdin=None, stdout=None):
             total_tokens, _ = ledger.get_session_token_stats(session_id)
 
         last_refreshed = ledger.get_last_refreshed_tokens(session_id)
+        if total_tokens < last_refreshed:
+            last_refreshed = 0
+            ledger.record_refresh(session_id, 0)
         tokens_since_refresh = max(0, total_tokens - last_refreshed)
 
         # Dynamic token volume trigger:
