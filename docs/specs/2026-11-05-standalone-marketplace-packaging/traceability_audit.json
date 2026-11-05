@@ -1,0 +1,120 @@
+{
+  "spec_hash": "6bfa3a9809191a457a80c094770e9f31c4d51b0533a0bc31c5bd59cc4478e3ff",
+  "evidence_hash": "a402ae6089442f9d7613b677bf00450a42105a1bf3ca28bc3e92bb94e3758877",
+  "auditor_model": "gemini-4-argon-high",
+  "verdict": "PASS",
+  "requirements_evaluated": {
+    "REQ-033": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-033 to scripts/json-gate.py and scripts/enforce-delegation.py. Section 2.1 details embedding JSON dict validation and verify_cmd execution (timeout=15) into scripts/enforce-delegation.py on send_message, while bundling scripts/json-gate.py for standalone testing and strictly omitting any 500-line ast-gate hook.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 1 implements bundling scripts/json-gate.py and integrating JSON handoff and verify_cmd validation into scripts/enforce-delegation.py on send_message; Task 6 adds unit and integration tests.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-001 explicitly debates retiring the deprecated ast-gate 500-line read blocker rather than bundling it, and addresses trade-offs of enforcing JSON handoff payloads with the AGY_DISABLE_JSON_GATE escape hatch.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 and Section 5 record test_req_033_json_gate_in_enforce_delegation and test_req_033_bundled_json_gate_script passing. Section 6.1 confirms 100.0% mutation kill rate on scripts/json-gate.py. Confirms JSON dict validation, verify_cmd execution with timeout, and clean retirement of ast-gate."
+    },
+    "REQ-034": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-034 to rules/AGENTS.md, templates/EXECUTOR.md, templates/COORDINATOR.md, and scripts/inject-rules.py. Section 2.2 defines templates/ path resolution with rules/ fallback in inject-rules.py, and specifies the 4-section architecture for rules/AGENTS.md staying strictly within the 8,000-character always-on budget with zero external plugin dependencies.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 2 relocates subagent prompt templates to templates/, updates scripts/inject-rules.py resolution logic, and authors the consolidated rules/AGENTS.md (<= 8,000 chars); Task 6 provides rule injection test coverage.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-002 evaluates Language Server GetAllPlugins behavior and establishes strict single-responsibility modularity, rejecting a monolithic multi-skill plugin bundle in favor of a focused, zero-dependency standalone plugin.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 and Section 5 record test_req_034_templates_resolution_in_inject_rules, test_req_034_consolidated_agents_md_budget_and_cleanliness, and test_two_tiered_escalation passing. Section 6.2 records 100.0% mutation kill rate on scripts/inject-rules.py. Confirms templates/ separation and rules/AGENTS.md character budget compliance."
+    },
+    "REQ-035": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-035 to skills/attention-metrics/SKILL.md, skills/git-worktree-sandbox/SKILL.md, and skills/git-worktree-sandbox/scripts/worktree_manager.py. Section 2.3 defines portable wildcard discovery (~/.gemini/config/plugins/*/) for scripts and skills across named and Marketplace hash directories, eliminating hardcoded user paths.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 3 packages git-worktree-sandbox under skills/, removes all /Users/thanghoang occurrences, and updates SKILL.md commands to portable wildcard paths; Task 6 validates plugin surface discovery.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-003 analyzes Marketplace installation directories using signed 64-bit integer hashes, rejecting hardcoded directory assumptions and justifying portable wildcard path resolution within canonical plugin roots.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 and Section 5 record test_req_035_git_worktree_sandbox_bundled_and_portable and test_verify_canonical_source_bundle passing. Section 4 confirms deploy_plugin.py --verify-only succeeds with 0 hardcoded personal user paths."
+    },
+    "REQ-036": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-036 to plugin.json, assets/logo.svg, LICENSE, .gitignore, and README.md. Section 2.4 specifies exact manifest fields per the Antigravity Plugin Loader specification, square 256x256 SVG shield asset requirements with 10% transparent margins, and repository hygiene rules.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 4 updates plugin.json with complete Marketplace metadata, adds assets/logo.svg and MIT LICENSE, updates .gitignore and README.md, and purges stray root scratch files; Task 6 verifies agy plugin validate . compliance.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-003 establishes Marketplace publishing compliance and distribution invariants, rejecting incomplete manifests and unversioned assets.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 and Section 5 record test_req_036_marketplace_manifest_and_assets passing. Section 2 records rtk agy plugin validate . passing with 2 skills and 2 hooks processed. Assets and LICENSE verified."
+    },
+    "REQ-037": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-037 to ~/.gemini/config/hooks.json, rules, skills, scripts, and tests. Design details the precise removal of deprecated ast-gate hooks, scripts, and SKILL.md references, as well as deduplication of migrated rules and skills from global configuration.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 5 removes ast-gate and migrated duplicate hooks, rules, and skills from ~/.gemini/config/, and strips ast-gate references from ast-grep-toolkit; Task 6 runs agy plugin validate, system_audit.py, and pytest.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-001 and ADR-003 justify the clean separation between global configuration and plugin-provided capabilities, removing legacy hooks without breaking companion plugins or skills.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 and Section 5 record test_req_037_global_config_cleanup passing. Section 3 records rtk python3 scripts/system_audit.py passing with Overall Valid: True and Total Errors: 0 across all 6 ecosystem plugins."
+    }
+  },
+  "requirements": {
+    "REQ-033": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-033 to scripts/json-gate.py and scripts/enforce-delegation.py. Section 2.1 details embedding JSON dict validation and verify_cmd execution (timeout=15) into scripts/enforce-delegation.py on send_message, while bundling scripts/json-gate.py for standalone testing and strictly omitting any 500-line ast-gate hook.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 1 implements bundling scripts/json-gate.py and integrating JSON handoff and verify_cmd validation into scripts/enforce-delegation.py on send_message; Task 6 adds unit and integration tests.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-001 explicitly debates retiring the deprecated ast-gate 500-line read blocker rather than bundling it, and addresses trade-offs of enforcing JSON handoff payloads with the AGY_DISABLE_JSON_GATE escape hatch.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 and Section 5 record test_req_033_json_gate_in_enforce_delegation and test_req_033_bundled_json_gate_script passing. Section 6.1 confirms 100.0% mutation kill rate on scripts/json-gate.py. Confirms JSON dict validation, verify_cmd execution with timeout, and clean retirement of ast-gate."
+    },
+    "REQ-034": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-034 to rules/AGENTS.md, templates/EXECUTOR.md, templates/COORDINATOR.md, and scripts/inject-rules.py. Section 2.2 defines templates/ path resolution with rules/ fallback in inject-rules.py, and specifies the 4-section architecture for rules/AGENTS.md staying strictly within the 8,000-character always-on budget with zero external plugin dependencies.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 2 relocates subagent prompt templates to templates/, updates scripts/inject-rules.py resolution logic, and authors the consolidated rules/AGENTS.md (<= 8,000 chars); Task 6 provides rule injection test coverage.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-002 evaluates Language Server GetAllPlugins behavior and establishes strict single-responsibility modularity, rejecting a monolithic multi-skill plugin bundle in favor of a focused, zero-dependency standalone plugin.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 and Section 5 record test_req_034_templates_resolution_in_inject_rules, test_req_034_consolidated_agents_md_budget_and_cleanliness, and test_two_tiered_escalation passing. Section 6.2 records 100.0% mutation kill rate on scripts/inject-rules.py. Confirms templates/ separation and rules/AGENTS.md character budget compliance."
+    },
+    "REQ-035": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-035 to skills/attention-metrics/SKILL.md, skills/git-worktree-sandbox/SKILL.md, and skills/git-worktree-sandbox/scripts/worktree_manager.py. Section 2.3 defines portable wildcard discovery (~/.gemini/config/plugins/*/) for scripts and skills across named and Marketplace hash directories, eliminating hardcoded user paths.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 3 packages git-worktree-sandbox under skills/, removes all /Users/thanghoang occurrences, and updates SKILL.md commands to portable wildcard paths; Task 6 validates plugin surface discovery.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-003 analyzes Marketplace installation directories using signed 64-bit integer hashes, rejecting hardcoded directory assumptions and justifying portable wildcard path resolution within canonical plugin roots.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 and Section 5 record test_req_035_git_worktree_sandbox_bundled_and_portable and test_verify_canonical_source_bundle passing. Section 4 confirms deploy_plugin.py --verify-only succeeds with 0 hardcoded personal user paths."
+    },
+    "REQ-036": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-036 to plugin.json, assets/logo.svg, LICENSE, .gitignore, and README.md. Section 2.4 specifies exact manifest fields per the Antigravity Plugin Loader specification, square 256x256 SVG shield asset requirements with 10% transparent margins, and repository hygiene rules.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 4 updates plugin.json with complete Marketplace metadata, adds assets/logo.svg and MIT LICENSE, updates .gitignore and README.md, and purges stray root scratch files; Task 6 verifies agy plugin validate . compliance.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-003 establishes Marketplace publishing compliance and distribution invariants, rejecting incomplete manifests and unversioned assets.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 and Section 5 record test_req_036_marketplace_manifest_and_assets passing. Section 2 records rtk agy plugin validate . passing with 2 skills and 2 hooks processed. Assets and LICENSE verified."
+    },
+    "REQ-037": {
+      "design_aligned": true,
+      "design_rationale": "Section 1 maps REQ-037 to ~/.gemini/config/hooks.json, rules, skills, scripts, and tests. Design details the precise removal of deprecated ast-gate hooks, scripts, and SKILL.md references, as well as deduplication of migrated rules and skills from global configuration.",
+      "tasks_actionable": true,
+      "tasks_rationale": "Task 5 removes ast-gate and migrated duplicate hooks, rules, and skills from ~/.gemini/config/, and strips ast-gate references from ast-grep-toolkit; Task 6 runs agy plugin validate, system_audit.py, and pytest.",
+      "decisions_consistent": true,
+      "architecturally_sound": true,
+      "debate_rationale": "ADR-001 and ADR-003 justify the clean separation between global configuration and plugin-provided capabilities, removing legacy hooks without breaking companion plugins or skills.",
+      "evidence_verified": true,
+      "evidence_rationale": "verification.md Section 1 and Section 5 record test_req_037_global_config_cleanup passing. Section 3 records rtk python3 scripts/system_audit.py passing with Overall Valid: True and Total Errors: 0 across all 6 ecosystem plugins."
+    }
+  }
+}

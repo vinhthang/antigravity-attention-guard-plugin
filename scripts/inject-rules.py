@@ -16,9 +16,10 @@ def extract_subagents(args: dict) -> list:
     return []
 
 def main(argv=None, stdin=None, stdout=None):
-    if argv is None: argv = sys.argv
-    if stdin is None: stdin = sys.stdin
-    if stdout is None: stdout = sys.stdout
+    if stdin is None:
+        stdin = sys.stdin
+    if stdout is None:
+        stdout = sys.stdout
     def emit(data):
         if os.environ.get("AGY_ATTENTION_GUARD_OBSERVATION_MODE") == "1":
             stdout.write(json.dumps({"decision": "allow", "overwrite": data.get("overwrite", {})}) + "\n")
@@ -30,8 +31,12 @@ def main(argv=None, stdin=None, stdout=None):
             emit({"decision": "allow"})
             return
         payload = json.loads(input_data)
-        executor_rule = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "rules", "EXECUTOR.md"))
-        coordinator_rule = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "rules", "COORDINATOR.md"))
+        executor_rule = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "templates", "EXECUTOR.md"))
+        if not os.path.exists(executor_rule):
+            executor_rule = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "rules", "EXECUTOR.md"))
+        coordinator_rule = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "templates", "COORDINATOR.md"))
+        if not os.path.exists(coordinator_rule):
+            coordinator_rule = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "rules", "COORDINATOR.md"))
         exec_rules_text = open(executor_rule, "r").read() if os.path.exists(executor_rule) else ""
         coord_rules_text = open(coordinator_rule, "r").read() if os.path.exists(coordinator_rule) else ""
         tool_call = payload.get("toolCall", {})

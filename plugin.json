@@ -1,3 +1,18 @@
 {
-  "name": "attention-guard"
+  "name": "attention-guard",
+  "displayName": "Attention Guard",
+  "version": "1.0.0",
+  "description": "Multi-agent context governance, subagent lifecycle enforcement, and attention protection for Google Antigravity.",
+  "logo": "assets/logo.svg",
+  "author": {
+    "name": "Sam Hoang",
+    "url": "https://github.com/vinhthang"
+  },
+  "homepage": "https://github.com/vinhthang/antigravity-attention-guard-plugin",
+  "repository": "https://github.com/vinhthang/antigravity-attention-guard-plugin",
+  "suggestedPrompts": [
+    "Review the active subagent delegation lifecycle and ledger metrics",
+    "Run system diagnostics on installed plugins and Attention Guard ledger",
+    "Plan a multi-step feature implementation using subagents in isolated worktrees"
+  ]
 }

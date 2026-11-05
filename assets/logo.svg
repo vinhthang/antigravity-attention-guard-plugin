@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" fill="none">
+  <defs>
+    <linearGradient id="shieldGrad" x1="28" y1="28" x2="228" y2="228" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00F2FE" />
+      <stop offset="50%" stop-color="#4FACFE" />
+      <stop offset="100%" stop-color="#6B11FF" />
+    </linearGradient>
+    <linearGradient id="lensGrad" x1="64" y1="64" x2="192" y2="192" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38EF7D" />
+      <stop offset="100%" stop-color="#11998E" />
+    </linearGradient>
+    <radialGradient id="coreGlow" cx="128" cy="128" r="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00F2FE" stop-opacity="0.9" />
+      <stop offset="60%" stop-color="#4FACFE" stop-opacity="0.5" />
+      <stop offset="100%" stop-color="#6B11FF" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- Outer Shield Contour (with >= 10% empty margin) -->
+  <path d="M128 32 C176 32, 216 48, 220 72 C220 144, 180 200, 128 224 C76 200, 36 144, 36 72 C40 48, 80 32, 128 32 Z" 
+        stroke="url(#shieldGrad)" 
+        stroke-width="12" 
+        stroke-linejoin="round" 
+        stroke-linecap="round"
+        fill="none" />
+
+  <!-- Inner Defense Ring / Lens Frame -->
+  <path d="M128 54 C164 54, 196 68, 200 86 C200 138, 168 182, 128 202 C88 182, 56 138, 56 86 C60 68, 92 54, 128 54 Z"
+        stroke="url(#shieldGrad)"
+        stroke-width="3"
+        stroke-dasharray="6 6"
+        opacity="0.6"
+        fill="none" />
+
+  <!-- Center Attention Focus Lens (Aperture / Eye) -->
+  <circle cx="128" cy="128" r="42" fill="url(#coreGlow)" />
+  <circle cx="128" cy="128" r="32" stroke="url(#shieldGrad)" stroke-width="6" fill="none" />
+  <circle cx="128" cy="128" r="14" fill="#00F2FE" />
+
+  <!-- Focus Target Reticles -->
+  <line x1="128" y1="80" x2="128" y2="92" stroke="#00F2FE" stroke-width="4" stroke-linecap="round" />
+  <line x1="128" y1="164" x2="128" y2="176" stroke="#00F2FE" stroke-width="4" stroke-linecap="round" />
+  <line x1="80" y1="128" x2="92" y2="128" stroke="#00F2FE" stroke-width="4" stroke-linecap="round" />
+  <line x1="164" y1="128" x2="176" y2="128" stroke="#00F2FE" stroke-width="4" stroke-linecap="round" />
+</svg>

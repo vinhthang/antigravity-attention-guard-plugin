@@ -22,6 +22,7 @@ except ImportError:
 CANONICAL_SOURCE = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
 INSTALLED_TARGET = os.path.realpath(os.path.expanduser("~/.gemini/config/plugins/attention-guard"))
 BUNDLE_ITEMS = ["plugin.json", "hooks.json", "rules", "schemas", "scripts", "skills"]
+OPTIONAL_BUNDLE_ITEMS = ["templates", "assets", "LICENSE"]
 
 def verify_source_bundle(source_dir: str) -> Tuple[bool, List[str]]:
     missing = []
@@ -34,13 +35,23 @@ def verify_source_bundle(source_dir: str) -> Tuple[bool, List[str]]:
         if item.endswith(".json"):
             try:
                 with open(item_path, "r", encoding="utf-8") as f:
-                    json.load(f)
+                    manifest = json.load(f)
+                if item == "plugin.json":
+                    logo = manifest.get("logo")
+                    if logo and not os.path.exists(os.path.join(source_dir, logo)):
+                        missing.append(f"manifest logo '{logo}' does not exist")
             except Exception as e:
                 missing.append(f"{item} (invalid JSON: {e})")
         elif os.path.isdir(item_path):
             entries = os.listdir(item_path)
             if not entries:
                 missing.append(f"{item} (empty directory)")
+
+    if os.path.realpath(source_dir) == CANONICAL_SOURCE:
+        for extra in ["templates", "assets", "LICENSE"]:
+            extra_p = os.path.join(source_dir, extra)
+            if not os.path.exists(extra_p):
+                missing.append(extra)
 
     surf_ok, surf_errs, _ = validate_plugin_surface(source_dir)
     if not surf_ok:
@@ -62,8 +73,22 @@ def deploy(source_dir: str = CANONICAL_SOURCE, target_dir: str = INSTALLED_TARGE
     os.makedirs(target_dir, exist_ok=True)
 
     print("Syncing bundle files to target plugin...")
-    for item in BUNDLE_ITEMS:
+    target_rules = os.path.join(target_dir, "rules")
+    source_rules = os.path.join(source_dir, "rules")
+    if os.path.isdir(target_rules) and os.path.isdir(source_rules):
+        src_rule_files = set(os.listdir(source_rules))
+        for existing in os.listdir(target_rules):
+            if existing not in src_rule_files:
+                stale_p = os.path.join(target_rules, existing)
+                if os.path.isfile(stale_p):
+                    os.remove(stale_p)
+                elif os.path.isdir(stale_p):
+                    shutil.rmtree(stale_p)
+
+    for item in BUNDLE_ITEMS + OPTIONAL_BUNDLE_ITEMS:
         src_item = os.path.join(source_dir, item)
+        if not os.path.exists(src_item):
+            continue
         dst_item = os.path.join(target_dir, item)
         if os.path.isdir(src_item):
             shutil.copytree(src_item, dst_item, dirs_exist_ok=True)

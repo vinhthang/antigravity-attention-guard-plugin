@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import sys, os, json, shlex, re, time, uuid
+import sys, os, json, shlex, re, time, uuid, subprocess
 from typing import Optional, Dict, Any, List, Tuple
 sys.path.insert(0, os.path.dirname(__file__))
 from common import (
@@ -565,6 +565,75 @@ def is_plan_execution_active(transcript_path, artifact_dir=None):
         sys.stderr.write(f"Warning in is_plan_execution_active: {exc}\n")
         return False
 
+def validate_json_handoff_message(args: dict, payload_context: Optional[dict] = None) -> Tuple[bool, Optional[str], Optional[dict]]:
+    if os.environ.get("AGY_DISABLE_JSON_GATE") == "1":
+        return True, None, None
+
+    message_raw = args.get("Message") if args.get("Message") is not None else args.get("message")
+    if isinstance(message_raw, dict):
+        message_data = message_raw
+    elif isinstance(message_raw, str):
+        msg_str = message_raw.strip()
+        if msg_str.startswith('"') and msg_str.endswith('"') and len(msg_str) >= 2:
+            try:
+                decoded = json.loads(msg_str)
+                if isinstance(decoded, str):
+                    msg_str = decoded.strip()
+                elif isinstance(decoded, dict):
+                    msg_str = json.dumps(decoded)
+            except Exception as dec_err:
+                _ = dec_err
+        try:
+            message_data = json.loads(msg_str)
+        except Exception as json_err:
+            _ = json_err
+            return False, "Handoff MUST be valid JSON. No conversational fluff.", None
+    else:
+        return False, "Handoff MUST be valid JSON. No conversational fluff.", None
+
+    if not isinstance(message_data, dict):
+        return False, "Handoff MUST be valid JSON. No conversational fluff.", None
+
+    verify_cmd = message_data.get("verify_cmd")
+    if verify_cmd is not None:
+        if not isinstance(verify_cmd, str):
+            return False, "Verification Failed: verify_cmd must be a string", message_data
+
+        destructive_err = check_destructive_command(verify_cmd)
+        if destructive_err:
+            return False, f"Verification Failed: destructive command rejected ({destructive_err})", message_data
+
+        if payload_context:
+            is_sub = payload_context.get("is_sub", False)
+            parent_is_thinking = payload_context.get("parent_is_thinking", False)
+            is_plan_active = payload_context.get("is_plan_active", True)
+            if not is_sub:
+                if parent_is_thinking and (is_test_command(verify_cmd) or is_build_command(verify_cmd)):
+                    return False, "Attention Guard: Primary Agent under thinking model is forbidden from executing test/build commands via verify_cmd. Delegate to a subagent.", message_data
+                if not is_plan_active and (is_test_command(verify_cmd) or is_build_command(verify_cmd)):
+                    return False, "Attention Guard: Plan execution is not active. Author plan and secure approval before executing test/build commands.", message_data
+
+        if os.environ.get("AGY_ATTENTION_GUARD_OBSERVATION_MODE") == "1":
+            return True, None, message_data
+
+        try:
+            res = subprocess.run(
+                verify_cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+            if res.returncode != 0:
+                err_output = res.stderr.strip() or res.stdout.strip() or f"exit code {res.returncode}"
+                return False, f"Verification Failed: {err_output}", message_data
+        except subprocess.TimeoutExpired:
+            return False, "Verification Failed: command timed out after 15s", message_data
+        except Exception as e:
+            return False, f"Verification Failed: {str(e)}", message_data
+
+    return True, None, message_data
+
 def main(argv=None, stdin=None, stdout=None):
     if argv is None: argv = sys.argv
     if stdin is None: stdin = sys.stdin
@@ -642,6 +711,17 @@ def main(argv=None, stdin=None, stdout=None):
                     return emit({"decision": "allow"})
 
             if tool_name in ["send_message", "default_api:send_message"]:
+                model_name = get_primary_model(data)
+                parent_is_thinking = is_thinking_model(model_name)
+                ctx = {
+                    "is_sub": False,
+                    "parent_is_thinking": parent_is_thinking,
+                    "is_plan_active": is_plan_execution_active(data.get("transcriptPath", "")),
+                }
+                valid_json, err_reason, msg_dict = validate_json_handoff_message(args, payload_context=ctx)
+                if not valid_json:
+                    return emit_deny(err_reason)
+
                 raw_rec = args.get("Recipient") if args.get("Recipient") is not None else args.get("recipient")
                 recipient = str(raw_rec or "").strip()
                 if recipient.startswith('"') and recipient.endswith('"') and len(recipient) >= 2:
@@ -653,31 +733,7 @@ def main(argv=None, stdin=None, stdout=None):
                         _ = dec_err
                         recipient = recipient[1:-1].strip()
 
-                msg_val = args.get("Message") if args.get("Message") is not None else args.get("message")
-                msg_str = str(msg_val or "").strip()
-                if msg_str.startswith('"') and msg_str.endswith('"') and len(msg_str) >= 2:
-                    try:
-                        decoded_msg = json.loads(msg_str)
-                        if isinstance(decoded_msg, str):
-                            msg_str = decoded_msg.strip()
-                        elif isinstance(decoded_msg, dict):
-                            msg_str = json.dumps(decoded_msg)
-                    except Exception as msg_err:
-                        _ = msg_err
-
-                is_valid_payload = False
                 if recipient:
-                    if os.environ.get("AGY_DISABLE_JSON_GATE") == "1":
-                        is_valid_payload = True
-                    else:
-                        try:
-                            parsed_msg = json.loads(msg_str) if isinstance(msg_str, str) else msg_str
-                            if isinstance(parsed_msg, dict):
-                                is_valid_payload = True
-                        except (json.JSONDecodeError, ValueError) as json_err:
-                            _ = json_err
-                            is_valid_payload = False
-                if is_valid_payload:
                     now = time.time()
                     turn_id, _ = get_turn_state(data.get("transcriptPath", ""))
                     conv_id = data.get("conversationId", "unknown")
@@ -734,6 +790,7 @@ def main(argv=None, stdin=None, stdout=None):
                         })
                     )
                     return emit({"decision": "allow"})
+                return emit({"decision": "allow"})
 
             transcript_path = data.get("transcriptPath", "")
             artifact_dir = data.get("artifactDirectoryPath") or data.get("artifact_dir")
@@ -782,6 +839,11 @@ def main(argv=None, stdin=None, stdout=None):
                         f"or explicitly terminate it via manage_task(Action=\"kill\", TaskId=\"...\") before reporting completion. "
                         f"Never fabricate <system_message> blocks."
                     )
+                ctx = {"is_sub": True}
+                valid_json, err_reason, _ = validate_json_handoff_message(args, payload_context=ctx)
+                if not valid_json:
+                    return emit_deny(err_reason)
+                return emit({"decision": "allow"})
             if tool_name in ["invoke_subagent", "manage_subagents", "default_api:invoke_subagent", "default_api:manage_subagents"]:
                 if not may_delegate or remaining_depth <= 0:
                     return emit_deny("Attention Dilution Guard: Subagents are forbidden from delegating tasks further. Do not invoke or manage subagents.")

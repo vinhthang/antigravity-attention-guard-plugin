@@ -402,8 +402,10 @@ def validate_plugin_surface(
                 skill_name = parts[1]
 
         # Check absolute / home-relative path references
-        for m in re.finditer(r'(?<![\w.\-~])(~?/[\w.\-]+(?:/[\w.\-]+)*/scripts/[A-Za-z0-9_.\-/]+\.py)', content):
+        for m in re.finditer(r'(?<![\w.\-~])(~?/[\w.\-*]+(?:/[\w.\-*]+)*/scripts/[A-Za-z0-9_.\-/*]+\.py)', content):
             raw_path = m.group(1)
+            if "*" in raw_path:
+                continue
             abs_path = os.path.expanduser(raw_path)
             if not os.path.exists(abs_path):
                 errs.append(f"Referenced absolute script '{raw_path}' in '{rel_path}' does not exist on disk")

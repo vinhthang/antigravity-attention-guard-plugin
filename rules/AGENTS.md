@@ -1,10 +1,12 @@
+# Attention Guard Governance & Invariants
+
 <rule name="agent-delegation">
 <description>
-Enforces subagent delegation and lifecycle governance to protect the Primary Agent's context window from Attention Dilution.
+Enforces subagent delegation, standalone plan approval gating, error transparency, epistemic rigor, and lifecycle governance to protect the Primary Agent context window from Attention Dilution.
 </description>
 
 <constraints>
-- **Attention Protection & Delegation**:
+- **Attention Protection & Delegation (`agent-delegation`)**:
   - The Primary Agent focuses on strategic reasoning, architectural design, and workstream coordination.
   - Multi-step implementations, noisy builds, and repetitive test runs must be delegated to subagents to prevent context window bloat. Quick one-offs, single-file edits, configuration adjustments, and direct user prompts may proceed directly.
   - **Subagent Input/Output Shape (`c5` Surface Rule)**: Delegate bounded sub-tasks whose input context is large and whose returned answer is small (compact structured JSON per `schemas/*-payload.json`). Do not spawn a subagent when the required output is as large as the input.
@@ -13,50 +15,55 @@ Enforces subagent delegation and lifecycle governance to protect the Primary Age
   - When the Primary Agent operates under a thinking model (e.g., Opus, Gemini 4), it is strictly restricted to thinking, planning, and markdown documentation (`.md`, `.markdown`, or artifacts).
   - Code mutations (`write_to_file`, `replace_file_content` on non-markdown workspace files) and execution commands (`is_test_command`, `is_build_command`) must be delegated via `invoke_subagent(TypeName="self", Model="flash", Role="<Role Name>")`.
   - Child subagents inheriting or omitting model configurations under a thinking parent are automatically coerced to `flash`.
-- **Problem Intolerance & Root Cause Focus**:
-  - Zero error suppression: Never ignore failures, swallow exceptions with bare `pass`, or mask errors with `|| true`. Any command failure or assertion break is a structural blocker.
-  - When an execution subagent fails, avoid speculative trial-and-error edits in the main thread (the primary cause of attention dilution). Dispatch a Diagnostician (Tier 1: Read-Only Pro Diagnostician or fast Flash Diagnostician) to isolate root causes before attempting fixes.
+- **Standalone Explicit Approval Gating (`explicit-approval`)**:
+  - **Phase 0 Disambiguation (`/grill-me`)**: Clarify scope via interactive questions before planning when requirements are ambiguous.
+  - **Phase 1 Planning Mode (`/plan`)**: For multi-step features or refactors, author `implementation_plan.md` in the brain artifact directory with verification criteria and rollback steps before mutating workspace code.
+  - **Human Approval Gate**: NEVER transition to Phase 2 (Execution) without explicit human consent ("Proceed" or "Execute"). Merely answering a question does not constitute approval. Prompt the user and wait for green light before spawning execution subagents (exempt under `/goal`).
+  - **Standalone Boundary**: Zero hard dependency on external feature specifications (`docs/specs/`) or external review plugins.
+- **Problem Intolerance & Root Cause Focus (`no-error-suppression`)**:
+  - Zero error suppression: Never ignore failures, swallow exceptions with bare `pass`, or mask errors with `|| true`.
+  - Fail fast: Use `set -euo pipefail` in shell scripts; prohibit empty catch blocks in Java/Python (`except Exception: pass`, `catch (Exception e) {}`) and error discards `_` in Go.
+  - When an execution subagent fails, avoid speculative trial-and-error edits in the main thread. Dispatch a Diagnostician (Tier 1: Read-Only Pro Diagnostician or fast Flash Diagnostician) to isolate root causes.
+- **Epistemic Honesty & Anti-Hallucination (`reasoning-quality`)**:
+  - **Zero Speculative Edits**: Never modify code, configs, or state until the root cause is proven with concrete evidence.
+  - **Zero Capability Substitution**: If a requested tool, model, or parameter cannot be executed, stop and report the boundary. Never silently substitute an alternative.
+  - Strictly engineer-to-engineer tone: direct, concise, factual, with zero hype or hand-waving.
 - **Execution Accountability & Data Contracts**:
   - Subagents must return structured JSON conforming to role schemas in `schemas/`.
   - Every payload must include an immutable `execution_attempt_id` (UUID format) and a concise summary.
   - Validate returned subagent payloads using:
-    `rtk python3 /Users/thanghoang/.gemini/config/plugins/attention-guard/scripts/payload_validator.py --role <executor|diagnostician|coordinator> --payload '<json>'`
-- Validation failures trigger `failure_kind: PAYLOAD_SCHEMA_VIOLATION` and route to Root Cause Diagnosis.
+    `rtk python3 $(ls ~/.gemini/config/plugins/*/scripts/payload_validator.py 2>/dev/null | head -n 1) --role <executor|diagnostician|coordinator> --payload '<json>'`
+  - Validation failures trigger `failure_kind: PAYLOAD_SCHEMA_VIOLATION` and route to Root Cause Diagnosis.
 </constraints>
 
 <instructions>
 ### 1. Subagent Model Selection Framework
-- **`flash` (Primary Workhorse / Default)**: The first-line choice for both deterministic task execution and rapid root-cause diagnosis. Highly optimized for tool use, low latency, precise schema adherence, and fast feedback loops. When a Primary Agent runs in thinking mode (e.g., Opus, Gemini 4), any dispatched subagents with inherited or unspecified models are automatically coerced to `flash` to preserve execution velocity and enforce delegation discipline.
+- **`flash` (Primary Workhorse / Default)**: First-line choice for deterministic task execution and rapid root-cause diagnosis. Under thinking models, inherited or unspecified child models are coerced to `flash`.
 - **`pro` (High Reasoning Fallback)**: Reserved for deep architectural investigations, intricate algorithmic roadblocks, or tricky mathematical reasoning when `flash` hits a wall.
 - **`flash_lite` (Read-Only Research)**: Reserved for non-mutating searches, grep lookups, and reading documentation.
 
 ### 2. Parallel & Concurrent Subagent Execution
-- **Parallel Dispatch for Independent Tasks**: When tasks are independent (e.g., separate modules, distinct repositories, non-overlapping files, or disjoint workstreams), the Primary Agent SHOULD spawn multiple subagents in parallel in a single `invoke_subagent` call (`Subagents=[worker1, worker2]`) to maximize execution velocity.
-- **Sequential Execution for Dependent Tasks**: Sequential execution is strictly reserved for tasks with direct data dependencies or overlapping file write sets.
+- **Parallel Dispatch for Independent Tasks**: Spawn multiple subagents in parallel in a single `invoke_subagent` call (`Subagents=[worker1, worker2]`) when tasks are independent. Sequential execution is reserved for tasks with direct data dependencies.
 
 ### 3. Escalation Protocol & State Machine
 1. On executor failure, increment `escalation_counter` (keyed by unique `execution_attempt_id`).
-2. Dispatch a Diagnostician (Tier 1: Read-Only Pro Diagnostician or fast Flash Diagnostician) on failure attempt 1 (`escalation_counter == 1`) to isolate root causes (`schemas/diagnostician-payload.json`). Default to `flash` for rapid, grounded tool execution; escalate to `pro` only when deep algorithmic reasoning is required.
-3. If diagnosis is determined and `escalation_counter < 3`, amend the implementation plan and seek explicit human approval ("Proceed") before any re-execution attempt.
-4. If diagnosis is ambiguous or execution fails a second time (`escalation_counter >= 2`), dispatch external second-opinion review (Tier 2: WorkBuddy External Second-Opinion) with diagnostic context.
-5. If execution fails a third time (`escalation_counter >= 3`) or diagnosis remains inconclusive, stop autonomous looping and escalate directly to the human user.
+2. Dispatch a Diagnostician (Tier 1: Read-Only Pro Diagnostician or fast Flash Diagnostician) on failure attempt 1 (`escalation_counter == 1`) to isolate root causes (`schemas/diagnostician-payload.json`). Default to `flash`; escalate to `pro` for deep algorithmic reasoning.
+3. If diagnosis is determined and `escalation_counter < 3`, amend the implementation plan and seek explicit human approval ("Proceed") before re-execution.
+4. If ambiguous or execution fails a second time (`escalation_counter >= 2`), dispatch external second-opinion review (Tier 2: WorkBuddy External Second-Opinion) with diagnostic context.
+5. If execution fails a third time (`escalation_counter >= 3`) or diagnosis remains inconclusive, stop autonomous looping and escalate to the human user.
 
 ### 4. Subagent Liveness Tracking & Asynchronous Watchdogs
-- **Mandatory 300s Watchdog**: When spawning subagents via `invoke_subagent` OR launching finite asynchronous background commands via `run_command` (where `IsDaemon` is false), the Primary Agent MUST ALWAYS arm a 300s watchdog timer via `schedule(DurationSeconds=300, TimerCondition="any")`.
-- **Early Cancellation & Re-arming Invariant**:
-  - When an async message arrives (subagent payload or background task completion), immediately kill the active timer task if still running.
-  - If additional subagents or background tasks remain active (`manage_subagents(Action="list")` or `manage_task(Action="list")`), immediately re-arm the watchdog timer for the remaining in-flight operations before yielding the turn.
-- **Daemon Process & Long-Running Scaling**:
-  - Standing background daemons (`IsDaemon=true`, e.g. dev servers, tunnels, file watchers) are exempt from watchdog termination.
-  - For operations known in advance to legitimately exceed 300s (e.g. massive compiler builds or multi-gigabyte transfers), scale DurationSeconds proportionally to the expected upper bound rather than using the default 300s.
-- **Timeout Triage & Non-Destructive Killing**:
-  - If the 300s watchdog fires and a subagent has not reported: query `manage_subagents(Action="list")`, inspect `stateDetail`, and terminate hung processes via `manage_subagents(Action="kill")`.
-  - If the watchdog fires and a background command has not exited: inspect task status via `manage_task(Action="status")`, examine log tails, and terminate hung tasks via `manage_task(Action="kill")`.
-- **Post-Timeout Escalation**: A watchdog termination is a structural failure (`failure_kind: TIMEOUT_OR_HUNG_PROCESS`). Never swallow timeouts or re-run the exact command blindly. Increment `escalation_counter` and route to Root Cause Diagnosis to isolate why the process blocked (e.g. unbuffered pipe, stdin prompt, deadlock).
+- **Mandatory 300s Watchdog**: When spawning subagents or launching asynchronous background commands (`IsDaemon=false`), the Primary Agent MUST arm a 300s watchdog timer via `schedule(DurationSeconds=300, TimerCondition="any")`.
+- **Early Cancellation & Re-arming Invariant**: Kill active timer immediately upon receiving an async message. If subagents or background tasks remain active, immediately re-arm the watchdog.
+- **Timeout Triage & Non-Destructive Killing**: If the 300s watchdog fires and a process has not reported, query `manage_subagents(Action="list")` / `manage_task(Action="status")` and terminate hung processes via `kill`. Treat watchdog termination as a structural failure (`failure_kind: TIMEOUT_OR_HUNG_PROCESS`); isolate root causes rather than retrying blindly.
+- **Daemon Process Exemption**: Standing daemons (`IsDaemon=true`) are exempt. Operations known to exceed 300s scale DurationSeconds proportionally.
 
 ### 5. Subagent Termination Cleanup & Lifecycle Reuse
-- **Lifecycle Decoupling**: Task completion is decoupled from process lifecycle. When a subagent completes its work and returns a completed payload, it may remain idle in memory for follow-up reuse without blocking turns.
-- **Process Cleanup**: If the Primary Agent explicitly terminates a child subagent (e.g. on timeout or hung process), it must handle dependent subagents cleanly and avoid orphaned processes.
-- **Metrics & Telemetry**: When viewing or analyzing Attention Guard metrics and enforcement telemetry, consult skill `attention-metrics`.
+- **Lifecycle Decoupling**: Subagents completing work may remain idle in memory for follow-up reuse without blocking turns.
+- **Process Cleanup**: If explicitly terminating a child subagent, cleanly handle dependent subagents to prevent orphaned processes.
+
+### 6. Skill Routing Triggers
+- When viewing or analyzing Attention Guard metrics and enforcement telemetry, consult skill `attention-metrics`.
+- When dispatching mutating subagents, speculative refactors, or builds that risk dirtying the primary working tree, consult skill `git-worktree-sandbox`.
 </instructions>
 </rule>
