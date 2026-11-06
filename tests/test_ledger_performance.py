@@ -1012,34 +1012,6 @@ def test_req_028_send_message_redispatch_and_watchdog_gate(tmp_path, monkeypatch
         assert row["status"] == "TERMINATED"
 
 
-def test_req_029_extract_prompt_workspaces_gemini_symlink_exclusion():
-    """REQ-029: Exclude lexical ~/.gemini/ paths before symlink resolution in spec-gate."""
-    spec_gate_path = Path.home() / ".gemini" / "config" / "plugins" / "spec-driven-plugin" / "scripts" / "spec-gate.py"
-    if not spec_gate_path.is_file():
-        spec_gate_path = REPO_ROOT.parent / "spec-driven-plugin" / "scripts" / "spec-gate.py"
-    assert spec_gate_path.is_file(), f"spec-gate.py must exist at {spec_gate_path}"
-
-    spec_sg = importlib.util.spec_from_file_location("spec_gate", str(spec_gate_path))
-    spec_gate = importlib.util.module_from_spec(spec_sg)
-    spec_sg.loader.exec_module(spec_gate)
-
-    candidate = Path.home() / "github" / "antigravity-attention-guard-plugin"
-    if not candidate.is_dir():
-        candidate = REPO_ROOT
-
-    home_dir = str(Path.home())
-    # Prompt containing ~/.gemini/ path referencing attention-guard schemas
-    prompt1 = f"Inspect {home_dir}/.gemini/config/plugins/attention-guard/schemas/executor-payload.json. Ensure validation."
-    workspaces1 = spec_gate.extract_prompt_workspaces(prompt1, [candidate])
-    assert workspaces1 == [], "Lexical ~/.gemini/ path must not resolve into candidate workspace"
-
-    # Prompt containing direct workspace path
-    prompt2 = f"Inspect {candidate}/rules/AGENTS.md for rules."
-    workspaces2 = spec_gate.extract_prompt_workspaces(prompt2, [candidate])
-    assert len(workspaces2) == 1
-    assert workspaces2[0].resolve() == candidate.resolve()
-
-
 def test_req_031_ledger_turns_lifecycle_and_prune(tmp_path):
     """REQ-031: Ledger sync_session_chars, turns table insertion on events, and turns prune."""
     db_path = str(tmp_path / "test_turns.db")

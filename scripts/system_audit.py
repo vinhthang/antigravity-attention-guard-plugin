@@ -31,14 +31,6 @@ try:
 except ImportError:
     validate_plugin_surface = None  # type: ignore
 
-REQUIRED_SPEC_GATE_TOOLS = [
-    "write_file",
-    "edit_file",
-    "write_to_file",
-    "replace_file_content",
-    "invoke_subagent",
-]
-
 
 def _extract_script_paths_from_command(command_str: str, base_dir: Path) -> List[Tuple[str, Path]]:
     """Extract candidate script file paths from a shell command string."""
@@ -130,26 +122,11 @@ def audit_hooks_config(hooks_path: Path) -> Tuple[bool, List[str], Dict[str, Any
     for key, value in data.items():
         if isinstance(value, dict):
             info["groups"].append(key)
-            is_spec_gate = (
-                "spec-gate" in key.lower()
-                or (isinstance(value, dict) and any("spec-gate" in str(v).lower() for v in value.values()))
-            )
             for event_name, event_val in value.items():
                 if isinstance(event_val, list):
                     for entry in event_val:
                         if isinstance(entry, dict) and "matcher" in entry:
                             matcher_raw = entry.get("matcher", "")
-                            # If this is spec-gate-plugin, verify matcher matches required tools
-                            if is_spec_gate:
-                                try:
-                                    pat = re.compile(matcher_raw)
-                                    for tool in REQUIRED_SPEC_GATE_TOOLS:
-                                        if not (pat.search(tool) or pat.search(f"default_api:{tool}")):
-                                            errors.append(
-                                                f"spec-gate-plugin matcher regex in {p} does not match required tool '{tool}' (matcher: {matcher_raw})"
-                                            )
-                                except Exception as exc:
-                                    errors.append(f"Invalid regex in matcher '{matcher_raw}': {exc}")
                             audit_hook_list(entry.get("hooks", []), key, event_name, matcher_str=matcher_raw)
                         elif isinstance(entry, dict) and "command" in entry:
                             audit_hook_list([entry], key, event_name)

@@ -7,10 +7,11 @@ from ledger import Ledger
 PRIMARY_RULES_REMINDER = """⚡ Attention Guard Reminder (Turn Refresh):
 
 Key Workflow Guidelines:
+- Primary Agent Boundary: Never modify non-Markdown source code or the runtime/package/cluster environment directly (neither via file tools nor via `run_command`). Delegate all code mutations, test/build runs, and environment operations to a `flash` subagent with a 300s `schedule` watchdog.
 - Adaptive Planning: Multi-step architecture features and refactors require implementation_plan.md and human approval ('Proceed') before subagent execution. Quick one-offs may proceed directly.
 - Problem Intolerance: Zero error suppression. No silent swallows or bare pass.
 - Root Cause Diagnosis: On subagent failure, dispatch pro Diagnostician to isolate root causes (max 3 escalations).
-- Execution Accountability: Subagents must return strict JSON schemas. Validate payloads using `rtk python3 scripts/payload_validator.py --role <role> --payload '<json>'`.
+- Execution Accountability: Subagents must return strict JSON schemas. Validate payloads using `rtk python3 $(ls ~/.gemini/config/plugins/*/scripts/payload_validator.py 2>/dev/null | head -n 1) --role <role> --payload '<json>'`.
 
 Continue with your current task."""
 

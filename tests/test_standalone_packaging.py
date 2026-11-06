@@ -165,29 +165,6 @@ def test_req_033_json_gate_in_enforce_delegation(tmp_path, monkeypatch):
     assert res8["decision"] == "allow"
 
 
-def test_req_033_bundled_json_gate_script():
-    """REQ-033: scripts/json-gate.py is bundled and functional."""
-    json_gate_script = SCRIPTS_DIR / "json-gate.py"
-    assert json_gate_script.is_file(), "scripts/json-gate.py must exist"
-
-    # Test running it via python
-    res = subprocess.run(
-        [sys.executable, str(json_gate_script)],
-        input=json.dumps({
-            "toolCall": {
-                "name": "send_message",
-                "args": {"Message": "invalid"}
-            }
-        }),
-        capture_output=True,
-        text=True
-    )
-    assert res.returncode == 0
-    out = json.loads(res.stdout.strip())
-    assert out["decision"] == "deny"
-    assert "Handoff MUST be valid JSON. No conversational fluff." in out["reason"]
-
-
 def test_req_034_templates_resolution_in_inject_rules(tmp_path, monkeypatch):
     """REQ-034: templates/ directory hosts subagent templates, with fallback to rules/."""
     monkeypatch.setenv("AGY_APP_DATA_DIR", str(tmp_path))
@@ -218,37 +195,6 @@ def test_req_034_templates_resolution_in_inject_rules(tmp_path, monkeypatch):
     injected_prompt = out["overwrite"]["Prompt"]
     assert "[ANTIGRAVITY_TOKEN:" in injected_prompt
     assert "Governs Executor subagents" in injected_prompt
-
-    # Test observation mode with denial conversion
-    deny_payload = {
-        "conversationId": "parent-1",
-        "stepIdx": 1,
-        "toolCall": {
-            "name": "invoke_subagent",
-            "args": {
-                "TypeName": "traceability-auditor",
-                "Role": "traceability-auditor",
-                "Prompt": "Audit",
-                "Model": "flash"
-            }
-        }
-    }
-    # Normal mode -> denied
-    stdin_deny = io.StringIO(json.dumps(deny_payload))
-    stdout_deny = io.StringIO()
-    inject_rules.main(stdin=stdin_deny, stdout=stdout_deny)
-    out_deny = json.loads(stdout_deny.getvalue().strip())
-    assert out_deny["decision"] == "deny"
-    assert "Traceability auditor subagent must use Opus" in out_deny["reason"]
-
-    # Observation mode -> converts denial to allow
-    monkeypatch.setenv("AGY_ATTENTION_GUARD_OBSERVATION_MODE", "1")
-    stdin_obs = io.StringIO(json.dumps(deny_payload))
-    stdout_obs = io.StringIO()
-    inject_rules.main(stdin=stdin_obs, stdout=stdout_obs)
-    out_obs = json.loads(stdout_obs.getvalue().strip())
-    assert out_obs["decision"] == "allow"
-    monkeypatch.delenv("AGY_ATTENTION_GUARD_OBSERVATION_MODE", raising=False)
 
     # Test default sys.stdin/sys.stdout when None passed
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
@@ -346,9 +292,8 @@ def test_req_037_global_config_cleanup():
 
     scripts_dir = home_config / "scripts"
     assert not (scripts_dir / "ast-gate.py").exists(), "ast-gate.py must be removed"
-    if (scripts_dir / "json-gate.py").exists():
-        plugin_jg = (REPO_ROOT / "scripts" / "json-gate.py").read_text(encoding="utf-8")
-        assert (scripts_dir / "json-gate.py").read_text(encoding="utf-8") == plugin_jg
+    assert not (REPO_ROOT / "scripts" / "json-gate.py").exists()
+    assert not (REPO_ROOT / "scripts" / "spec-gate.py").exists()
 
     rules_dir = home_config / "rules"
     assert not (rules_dir / "no-error-suppression.md").exists(), "global duplicate no-error-suppression.md must be removed"

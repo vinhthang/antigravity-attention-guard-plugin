@@ -360,6 +360,8 @@ def test_emit_reminder_default_text():
     refresh_mod._emit_reminder(out, reminder_text=None)
     data = json.loads(out.getvalue().strip())
     assert refresh_mod.PRIMARY_RULES_REMINDER in data["injectSteps"][0]["ephemeralMessage"]
+    assert "Primary Agent Boundary:" in refresh_mod.PRIMARY_RULES_REMINDER
+    assert "~/.gemini/config/plugins/*/scripts/payload_validator.py" in refresh_mod.PRIMARY_RULES_REMINDER
 
 
 def test_zero_interval_resets_to_default(monkeypatch):

@@ -26,7 +26,8 @@ from typing import Any, Dict
 import pytest
 
 # Ensure scripts dir is on sys.path
-SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR = REPO_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import common
@@ -50,19 +51,6 @@ inject_mod = _load_script_module("inject_rules_e2e", "inject-rules.py")
 record_mod = _load_script_module("record_tool_result_e2e", "record-tool-result.py")
 attention_check_mod = _load_script_module("attention_check_e2e", "attention-check.py")
 system_audit_mod = _load_script_module("system_audit_e2e", "system_audit.py")
-
-# Also load spec-gate.py
-SPEC_GATE_PATH = Path("/Users/thanghoang/.gemini/config/plugins/spec-driven-plugin/scripts/spec-gate.py")
-if not SPEC_GATE_PATH.is_file():
-    SPEC_GATE_PATH = SCRIPTS_DIR / "spec-gate.py"
-
-spec_gate_spec = importlib.util.spec_from_file_location("spec_gate_e2e", str(SPEC_GATE_PATH))
-if spec_gate_spec and spec_gate_spec.loader:
-    spec_gate_mod = importlib.util.module_from_spec(spec_gate_spec)
-    sys.modules["spec_gate_e2e"] = spec_gate_mod
-    spec_gate_spec.loader.exec_module(spec_gate_mod)
-else:
-    spec_gate_mod = None
 
 
 def run_hook(mod: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -159,16 +147,11 @@ def test_full_primary_and_subagent_lifecycle_with_no_tool_call(e2e_env):
         "stepIdx": 0,
     }
 
-    # 1. spec-gate.py
-    if spec_gate_mod is not None:
-        sg_res = run_hook(spec_gate_mod, primary_payload)
-        assert sg_res.get("decision") == "allow", f"spec-gate rejected: {sg_res}"
-
-    # 2. enforce-delegation.py
+    # 1. enforce-delegation.py
     enf_res = run_hook(enforce_mod, primary_payload)
     assert enf_res.get("decision") == "allow", f"enforce-delegation rejected: {enf_res}"
 
-    # 3. inject-rules.py
+    # 2. inject-rules.py
     inj_res = run_hook(inject_mod, primary_payload)
     assert inj_res.get("decision") == "allow", f"inject-rules rejected: {inj_res}"
     assert "overwrite" in inj_res, "inject-rules must provide overwrite dictionary"

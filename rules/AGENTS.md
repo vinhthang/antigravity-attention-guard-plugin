@@ -13,7 +13,7 @@ Enforces subagent delegation, standalone plan approval gating, error transparenc
   - Multi-step implementation plans require explicit human approval ("Proceed") before execution subagents are dispatched.
 - **Thinking Mode Primary Agent Restrictions**:
   - When the Primary Agent operates under a thinking model (e.g., Opus, Gemini 4), it is strictly restricted to thinking, planning, and markdown documentation (`.md`, `.markdown`, or artifacts).
-  - Code mutations (`write_to_file`, `replace_file_content` on non-markdown workspace files) and execution commands (`is_test_command`, `is_build_command`) must be delegated via `invoke_subagent(TypeName="self", Model="flash", Role="<Role Name>")`.
+  - Never modify source code or the runtime/package/cluster environment directly (neither via file tools nor via `run_command`). Delegate all code mutations, test/build runs, and environment operations via `invoke_subagent(TypeName="self", Model="flash", Role="<Role Name>")`.
   - Child subagents inheriting or omitting model configurations under a thinking parent are automatically coerced to `flash`.
 - **Standalone Explicit Approval Gating (`explicit-approval`)**:
   - **Phase 0 Disambiguation (`/grill-me`)**: Clarify scope via interactive questions before planning when requirements are ambiguous.
