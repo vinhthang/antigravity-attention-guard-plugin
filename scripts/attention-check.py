@@ -19,7 +19,9 @@ def increment_rejection_count(tracker):
     return count
 def reset_rejection_count(tracker):
     count_file = tracker + "_stop_count"
-    try: os.remove(count_file)
+    try:
+        if os.path.exists(count_file):
+            os.remove(count_file)
     except Exception as exc: sys.stderr.write(f"Warning: {exc}\n")
 
 def check_walkthrough_requirement(payload, conv_id, min_mtime=None):

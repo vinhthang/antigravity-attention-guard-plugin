@@ -129,6 +129,14 @@ _TRANSCRIPT_CACHE = {}
 def clear_transcript_cache():
     _TRANSCRIPT_CACHE.clear()
 
+def _remove_matching_task_id(target_list: list, task_id: str):
+    tid_clean = task_id.strip()
+    tid_base = tid_clean.split("/")[-1]
+    matched = [t for t in target_list if t == tid_clean or t.split("/")[-1] == tid_base]
+    for m in matched:
+        target_list.remove(m)
+
+
 def parse_transcript(transcript_path: str) -> dict:
     empty_result = {
         "turn_id": 0,
@@ -215,13 +223,9 @@ def parse_transcript(transcript_path: str) -> dict:
                     active_timers_since_wakeup.clear()
                     content = str(step.get("content") or "")
                     for m in system_sender_task_pattern.finditer(content):
-                        tid = m.group(1).strip()
-                        if tid in active_bg_tasks:
-                            active_bg_tasks.remove(tid)
+                        _remove_matching_task_id(active_bg_tasks, m.group(1))
                     for m in system_task_finish_pattern.finditer(content):
-                        tid = m.group(1).strip()
-                        if tid in active_bg_tasks:
-                            active_bg_tasks.remove(tid)
+                        _remove_matching_task_id(active_bg_tasks, m.group(1))
 
                 if stype in ("USER_INPUT", "SYSTEM_MESSAGE"):
                     content = str(step.get("content") or "")
@@ -266,7 +270,16 @@ def parse_transcript(transcript_path: str) -> dict:
 
                 if stype == "GENERIC":
                     content = str(step.get("content") or "")
-                    m_bg = task_bg_pattern.search(content) if ("Command output:" not in content and "Command exited with code" not in content) else None
+                    step_status = step.get("status")
+                    is_candidate_bg = (
+                        step_status in ("RUNNING", None, "")
+                        and "Completed At:" not in content
+                        and "Command exited with code" not in content
+                        and "The command exited with code" not in content
+                        and "Command output:" not in content
+                        and ("Task logs are available at:" in content or "YOU MUST TAKE ONE OF THE FOLLOWING TWO ACTIONS:" in content or "Task Description:" in content)
+                    )
+                    m_bg = task_bg_pattern.search(content) if is_candidate_bg else None
                     if m_bg:
                         task_id = m_bg.group(1).strip()
                         is_own_task = True
@@ -325,14 +338,12 @@ def parse_transcript(transcript_path: str) -> dict:
                     m_cancel = task_cancel_pattern.search(content)
                     if m_cancel:
                         cancelled_id = m_cancel.group(1).strip()
-                        if cancelled_id in active_bg_tasks:
-                            active_bg_tasks.remove(cancelled_id)
-                        if cancelled_id in active_timers_since_wakeup:
-                            active_timers_since_wakeup.remove(cancelled_id)
-                            for t in reversed(list(active_timers_since_wakeup)):
-                                if t.startswith("schedule_call_"):
-                                    active_timers_since_wakeup.remove(t)
-                                    break
+                        _remove_matching_task_id(active_bg_tasks, cancelled_id)
+                        _remove_matching_task_id(active_timers_since_wakeup, cancelled_id)
+                        for t in reversed(list(active_timers_since_wakeup)):
+                            if t.startswith("schedule_call_"):
+                                active_timers_since_wakeup.remove(t)
+                                break
 
         result = {
             "turn_id": turn_id,

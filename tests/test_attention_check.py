@@ -208,3 +208,42 @@ class TestStopRejectionLimit:
         assert result.get("decision") == "continue"
         assert "Walkthrough Gate" in result.get("reason", "")
 
+    def test_transcript_inspection_output_not_treated_as_active_bg_task(self, tmp_path):
+        from common import parse_transcript
+        transcript = tmp_path / "inspect_transcript.jsonl"
+        create_transcript(str(transcript), [
+            {"source": "USER", "type": "USER_INPUT", "content": "view logs", "step_index": 1},
+            {
+                "source": "MODEL",
+                "type": "GENERIC",
+                "status": "DONE",
+                "content": (
+                    "Created At: 2026-11-15T12:00:00+07:00\n"
+                    "Completed At: 2026-11-15T12:00:01+07:00\n"
+                    "Command exited with code 0.\n"
+                    "Command output:\n"
+                    "Tool is running as a background task with task id: test-conv/task-999\n"
+                    "Task Description: inspect old task\n"
+                )
+            }
+        ])
+        parsed = parse_transcript(str(transcript))
+        assert parsed["active_bg_tasks"] == [], "Command output echoing background task string must not be treated as active task"
+
+    def test_reset_rejection_count_no_stderr_warning(self, monkeypatch, capsys):
+        import attention_check
+        attention_check.reset_rejection_count("/tmp/non_existent_tracker_path_12345")
+        captured = capsys.readouterr()
+        assert "Warning" not in captured.err
+
+    def test_remove_matching_task_id_bare_and_full(self):
+        from common import _remove_matching_task_id
+        tasks = ["conv-1/task-100", "task-200", "conv-2/task-300"]
+        # Remove by bare ID
+        _remove_matching_task_id(tasks, "task-100")
+        assert "conv-1/task-100" not in tasks
+        # Remove by full ID
+        _remove_matching_task_id(tasks, "conv-x/task-200")
+        assert "task-200" not in tasks
+        assert tasks == ["conv-2/task-300"]
+
