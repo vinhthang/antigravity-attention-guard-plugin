@@ -1,7 +1,7 @@
 {
   "name": "attention-guard",
   "displayName": "Attention Guard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Multi-agent context governance, subagent lifecycle enforcement, and attention protection for Google Antigravity.",
   "logo": "assets/logo.svg",
   "author": {

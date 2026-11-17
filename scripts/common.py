@@ -5,7 +5,38 @@ import re
 import shlex
 from ledger import Ledger
 
-DEFAULT_THINKING_MODELS = ["opus", "gemini-4", "gemini 4"]
+DEFAULT_THINKING_MODELS = ["opus", "gemini-4", "gemini 4", "argon", "carbon"]
+
+def _parse_positive_int_env(var_name: str):
+    raw = os.environ.get(var_name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        val = int(raw.strip())
+        return val if val > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+def resolve_context_budget(model_name: str = "") -> tuple[int, int]:
+    """Resolve (token_budget, checkpoint_threshold) by model family and env overrides."""
+    name_lower = model_name.lower() if isinstance(model_name, str) else ""
+    if any(k in name_lower for k in ("gemini", "argon", "carbon")):
+        budget, threshold = 1_000_000, 400_000
+    elif any(k in name_lower for k in ("opus", "sonnet", "claude")):
+        budget, threshold = 200_000, 140_000
+    else:
+        budget, threshold = 128_000, 80_000
+
+    budget_override = _parse_positive_int_env("AGY_TOKEN_BUDGET")
+    thresh_override = _parse_positive_int_env("AGY_CHECKPOINT_THRESHOLD")
+    if budget_override is not None:
+        budget = budget_override
+        if thresh_override is None:
+            threshold = max(1, int(budget * 0.625))
+    if thresh_override is not None:
+        threshold = thresh_override
+    threshold = min(threshold, budget)
+    return budget, threshold
 
 def get_primary_model(data=None):
     if isinstance(data, dict):
@@ -137,6 +168,72 @@ def _remove_matching_task_id(target_list: list, task_id: str):
         target_list.remove(m)
 
 
+_CMD_TOOLS = ("run_command", "default_api:run_command")
+_ASYNC_OR_WORKFLOW_TOOLS = (
+    "run_command", "default_api:run_command",
+    "run_workflow", "default_api:run_workflow",
+)
+
+
+def _pop_matching_planner_call(
+    planner_tool_calls: list,
+    match_text: str,
+    bidirectional: bool = False,
+    is_cmd_exit: bool = False,
+    is_sync_completion: bool = False,
+):
+    if not planner_tool_calls:
+        return None
+    allowed_names = _CMD_TOOLS if is_cmd_exit else _ASYNC_OR_WORKFLOW_TOOLS
+    eligible = []
+    for i, tc in enumerate(planner_tool_calls):
+        tname = tc.get("name")
+        if tname not in allowed_names:
+            continue
+        tc_args = tc.get("args") or {}
+        if tname in _CMD_TOOLS:
+            tc_summary = str(tc_args.get("toolSummary") or "").strip().strip('"\'')
+            tc_cmd = str(tc_args.get("CommandLine") or "").strip().strip('"\'')
+            candidates = (tc_summary, tc_cmd)
+            has_explicit_label = bool(tc_summary)
+            raw_d = tc_args.get("IsDaemon")
+            is_daemon_call = raw_d if isinstance(raw_d, bool) else (str(raw_d or "").strip().lower().strip('"\'') in ("true", "1", "yes"))
+        else:
+            tc_desc = str(tc_args.get("Description") or tc_args.get("description") or "").strip().strip('"\'')
+            candidates = (tc_desc,)
+            has_explicit_label = bool(tc_desc)
+            is_daemon_call = False
+        eligible.append((i, has_explicit_label, tname in _CMD_TOOLS, is_daemon_call))
+        for cand in candidates:
+            if cand and (cand in match_text or (bidirectional and match_text and match_text in cand)):
+                return planner_tool_calls.pop(i)
+    if is_sync_completion and not is_cmd_exit:
+        predicates = (
+            lambda lbl, is_cmd, is_d: not lbl and not is_cmd,
+            lambda lbl, is_cmd, is_d: not is_cmd,
+            lambda lbl, is_cmd, is_d: not lbl and not is_d,
+            lambda lbl, is_cmd, is_d: not is_d,
+        )
+    elif is_cmd_exit:
+        predicates = (
+            lambda lbl, is_cmd, is_d: not lbl and not is_d,
+            lambda lbl, is_cmd, is_d: not is_d,
+        )
+    else:
+        predicates = (
+            lambda lbl, is_cmd, is_d: not lbl and is_d,
+            lambda lbl, is_cmd, is_d: not lbl,
+            lambda lbl, is_cmd, is_d: is_cmd,
+        )
+    for pred in predicates:
+        for i, has_explicit_label, is_cmd, is_daemon_call in eligible:
+            if pred(has_explicit_label, is_cmd, is_daemon_call):
+                return planner_tool_calls.pop(i)
+    if eligible:
+        return planner_tool_calls.pop(eligible[0][0])
+    return None
+
+
 def parse_transcript(transcript_path: str) -> dict:
     empty_result = {
         "turn_id": 0,
@@ -203,7 +300,9 @@ def parse_transcript(transcript_path: str) -> dict:
                     if stype_raw in ("CHECKPOINT", "COMPACTION") or "compacted" in str(stype_raw).lower() or "resuming from a compaction" in content_str.lower():
                         active_context_chars = 0
                     else:
-                        active_context_chars += len(str(step.get("content") or ""))
+                        if stype_raw in ("USER_INPUT", "SYSTEM_MESSAGE") and "<context_summary>" in content_str.lower():
+                            active_context_chars = 0
+                        active_context_chars += len(content_str)
                         tool_calls = step.get("tool_calls") or []
                         if tool_calls:
                             try:
@@ -246,7 +345,12 @@ def parse_transcript(transcript_path: str) -> dict:
                         planner_tool_calls = [tc for tc in tcs if isinstance(tc, dict)]
                         if any(
                             isinstance(tc, dict)
-                            and tc.get("name") in ("invoke_subagent", "default_api:invoke_subagent", "send_message", "default_api:send_message")
+                            and tc.get("name") in (
+                                "invoke_subagent", "default_api:invoke_subagent",
+                                "send_message", "default_api:send_message",
+                                "run_workflow", "default_api:run_workflow",
+                                "swarm", "default_api:swarm",
+                            )
                             for tc in tcs
                         ):
                             current_turn_delegated = True
@@ -299,41 +403,28 @@ def parse_transcript(transcript_path: str) -> dict:
                                     if task_id not in active_timers_since_wakeup:
                                         active_timers_since_wakeup.append(task_id)
                             elif not desc.startswith("Cron:"):
-                                matched_tc = None
-                                if planner_tool_calls:
-                                    for i, tc in enumerate(planner_tool_calls):
-                                        if tc.get("name") in ("run_command", "default_api:run_command"):
-                                            tc_args = tc.get("args") or {}
-                                            tc_summary = str(tc_args.get("toolSummary") or "").strip().strip('"\'')
-                                            tc_cmd = str(tc_args.get("CommandLine") or "").strip().strip('"\'')
-                                            if (tc_summary and (tc_summary in desc or desc in tc_summary)) or \
-                                               (tc_cmd and (tc_cmd in desc or desc in tc_cmd)):
-                                                matched_tc = planner_tool_calls.pop(i)
-                                                break
-                                    if not matched_tc:
-                                        for i, tc in enumerate(planner_tool_calls):
-                                            if tc.get("name") in ("run_command", "default_api:run_command"):
-                                                matched_tc = planner_tool_calls.pop(i)
-                                                break
-                                raw_is_daemon = (matched_tc.get("args") or {}).get("IsDaemon") if matched_tc else False
-                                is_daemon = raw_is_daemon if isinstance(raw_is_daemon, bool) else (str(raw_is_daemon or "").strip().lower().strip('"\'') in ("true", "1", "yes"))
+                                matched_tc = _pop_matching_planner_call(
+                                    planner_tool_calls,
+                                    desc,
+                                    bidirectional=True,
+                                    is_cmd_exit=False,
+                                )
+                                is_daemon = False
+                                if matched_tc and matched_tc.get("name") in _CMD_TOOLS:
+                                    raw_is_daemon = (matched_tc.get("args") or {}).get("IsDaemon")
+                                    is_daemon = raw_is_daemon if isinstance(raw_is_daemon, bool) else (str(raw_is_daemon or "").strip().lower().strip('"\'') in ("true", "1", "yes"))
                                 if not is_daemon and task_id not in active_bg_tasks:
                                     active_bg_tasks.append(task_id)
 
                     if "Command exited with code" in content or "Completed At:" in content:
-                        for i, tc in enumerate(planner_tool_calls):
-                            if tc.get("name") in ("run_command", "default_api:run_command"):
-                                tc_args = tc.get("args") or {}
-                                tc_summary = str(tc_args.get("toolSummary") or "").strip().strip('"\'')
-                                tc_cmd = str(tc_args.get("CommandLine") or "").strip().strip('"\'')
-                                if (tc_summary and tc_summary in content) or (tc_cmd and tc_cmd in content):
-                                    planner_tool_calls.pop(i)
-                                    break
-                        else:
-                            for i, tc in enumerate(planner_tool_calls):
-                                if tc.get("name") in ("run_command", "default_api:run_command"):
-                                    planner_tool_calls.pop(i)
-                                    break
+                        is_cmd_exit = ("Command exited with code" in content or "Command output:" in content)
+                        _pop_matching_planner_call(
+                            planner_tool_calls,
+                            content,
+                            bidirectional=False,
+                            is_cmd_exit=is_cmd_exit,
+                            is_sync_completion=True,
+                        )
 
                     m_cancel = task_cancel_pattern.search(content)
                     if m_cancel:
@@ -449,5 +540,87 @@ def is_subagent(data, ledger=None):
         sys.stderr.write(f"Error in is_subagent: {exc}\n")
 
     return False, False, 0, None, None
+
+
+def _classify_native_worker(data: dict, parsed: dict | None = None) -> tuple[bool, bool]:
+    """Return (is_worker, is_leaf) for Antigravity 2.0 native swarm/workflow workers."""
+    if isinstance(data, dict):
+        if any(bool(data.get(k)) for k in ("workflowId", "isWorkflowAgent")):
+            return True, True
+        if any(bool(data.get(k)) for k in ("swarmMember", "isSwarmWorker")):
+            return True, False
+
+    if parsed is None:
+        transcript_path = data.get("transcriptPath", "") if isinstance(data, dict) else ""
+        if not transcript_path or not os.path.exists(transcript_path):
+            return False, False
+        parsed = parse_transcript(transcript_path)
+
+    worker_kind = None
+    saw_coordinator_or_human = False
+    for _, _, step in parsed.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        stype = step.get("type", "")
+        source = str(step.get("source") or "")
+        if stype in ("USER_INPUT", "SYSTEM_MESSAGE"):
+            content = str(step.get("content") or "")
+            has_user_req_tag = source == "USER_EXPLICIT" and bool(re.search(r"(?:^|\n)\s*<USER_REQUEST>(?:\s|\n|>|$)", content))
+            if has_user_req_tag:
+                saw_coordinator_or_human = True
+                worker_kind = None
+                continue
+            if stype == "SYSTEM_MESSAGE" and ("[Message] timestamp=" in content or re.search(r"\bsender=", content)):
+                continue
+            has_swarm_tag = bool(re.search(r"(?:^|\n)\s*<swarm_worker>(?:\s|\n|$)", content))
+            has_workflow_prefix = content.lstrip().startswith("[AGY_WORKFLOW_WORKER]")
+            has_swarm_worker_end = bool(re.search(r"(?:^|\n)\[AGY_SWARM_WORKER\]\s*$", content.strip()))
+            has_swarm_helper_end = bool(re.search(r"(?:^|\n)\[AGY_SWARM_HELPER\]\s*$", content.strip()))
+            if source == "USER_EXPLICIT" and not (
+                has_swarm_tag or has_workflow_prefix or has_swarm_worker_end or has_swarm_helper_end
+            ):
+                saw_coordinator_or_human = True
+                worker_kind = None
+                continue
+            if not saw_coordinator_or_human:
+                if has_swarm_helper_end:
+                    worker_kind = "swarm_helper"
+                elif has_workflow_prefix:
+                    worker_kind = "workflow"
+                elif has_swarm_tag or has_swarm_worker_end:
+                    worker_kind = "swarm_worker"
+            elif (
+                stype == "USER_INPUT"
+                and source != "USER_EXPLICIT"
+                and not re.search(r"\bsender=", content)
+                and (has_swarm_worker_end or has_swarm_helper_end)
+            ):
+                worker_kind = "swarm_helper" if has_swarm_helper_end else "swarm_worker"
+        elif stype == "PLANNER_RESPONSE":
+            for tc in step.get("tool_calls") or []:
+                if not isinstance(tc, dict):
+                    continue
+                tname = tc.get("name")
+                if tname in ("invoke_subagent", "default_api:invoke_subagent", "run_workflow", "default_api:run_workflow"):
+                    saw_coordinator_or_human = True
+                    worker_kind = None
+                    break
+                if tname in ("swarm", "default_api:swarm"):
+                    action = str((tc.get("args") or {}).get("action") or "").strip().strip('"\'').lower()
+                    if action == "title":
+                        saw_coordinator_or_human = True
+                        worker_kind = None
+                        break
+    return worker_kind is not None, worker_kind in ("swarm_helper", "workflow")
+
+
+def is_native_worker(data: dict, parsed: dict | None = None) -> bool:
+    """Return True when payload or transcript identifies an Antigravity 2.0 native swarm/workflow worker."""
+    return _classify_native_worker(data, parsed=parsed)[0]
+
+
+def is_leaf_native_worker(data: dict, parsed: dict | None = None) -> bool:
+    """Return True for leaf native workers ([AGY_SWARM_HELPER], [AGY_WORKFLOW_WORKER], workflowId/isWorkflowAgent)."""
+    return _classify_native_worker(data, parsed=parsed)[1]
 
 

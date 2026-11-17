@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-import sys, os, json, uuid, time
+import sys, os, json, uuid, time, re
 sys.path.insert(0, os.path.dirname(__file__))
-from common import is_subagent, get_turn_state, get_primary_model, is_thinking_model
+from common import is_subagent, is_native_worker, get_turn_state, get_primary_model, is_thinking_model
 from ledger import Ledger
 from context_boundary import EVIDENCE_BOUNDARY, materialize_context_pointer
 
@@ -40,6 +40,24 @@ def main(argv=None, stdin=None, stdout=None):
         exec_rules_text = open(executor_rule, "r").read() if os.path.exists(executor_rule) else ""
         coord_rules_text = open(coordinator_rule, "r").read() if os.path.exists(coordinator_rule) else ""
         tool_call = payload.get("toolCall", {})
+        if tool_call.get("name") in ["swarm", "default_api:swarm"]:
+            args = tool_call.get("args") or {}
+            action = str(args.get("action") or "").strip().strip('"\'').lower() if isinstance(args, dict) else ""
+            if action == "add":
+                worker_name = str(args.get("name") or "").strip().lower()
+                is_excluded = worker_name in ("narrator", "monitor") or worker_name.startswith(("narrator-", "monitor-"))
+                brief = args.get("brief")
+                if not is_excluded and isinstance(brief, str) and brief.strip():
+                    expected_tag = "[AGY_SWARM_HELPER]" if is_native_worker(payload) else "[AGY_SWARM_WORKER]"
+                    base_brief = re.sub(r"(?:(?:^|\r?\n)\s*\[AGY_SWARM_(?:WORKER|HELPER)\]\s*)+$", "", brief).rstrip()
+                    normalized_brief = f"{base_brief}\n{expected_tag}" if base_brief else expected_tag
+                    if re.search(rf"(?:^|\n){re.escape(expected_tag)}\s*$", brief.strip()) and brief.strip() == normalized_brief:
+                        emit({"decision": "allow"})
+                        return
+                    emit({"decision": "allow", "overwrite": {**args, "brief": normalized_brief}})
+                    return
+            emit({"decision": "allow"})
+            return
         if tool_call.get("name") in ["invoke_subagent", "default_api:invoke_subagent"]:
             args = tool_call.get("args", {})
             is_flat = "Subagents" not in args and ("Prompt" in args or "TypeName" in args or "Role" in args)

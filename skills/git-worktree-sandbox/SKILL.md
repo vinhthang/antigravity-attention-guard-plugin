@@ -9,10 +9,12 @@ Use this skill to provision, manage, and tear down isolated working trees for su
 
 ---
 
-## 1. Why Worktree Isolation?
-1. **Zero Collision**: Subagents work on their own branch in `.worktrees/<task-id>` without touching your primary files or test cache.
-2. **Safe Discards**: If a subagent fails or goes down an invalid path, the entire worktree is pruned without touching uncommitted changes in the main working tree.
-3. **True Concurrency**: Enables parallel builds or test runs on different commits simultaneously.
+## 1. Native `Workspace="share"` vs. Manual Git Worktree Sandboxes
+- **Prefer Native Antigravity 2.0 Workspaces First**: When dispatching parallel workers via `invoke_subagent`, `run_workflow` `agent()`, or `swarm`, pass `Workspace="share"` (or `workspace="share"`) first—Antigravity provisions an isolated working copy sharing the underlying git object store automatically.
+- **Use `git-worktree-sandbox` When**:
+  1. **Persistent Named Sandbox Branches**: You want deterministic `.worktrees/<task-id>` directories on `sandbox/<task-id>` branches that persist across CLI scripts, manual inspection, or external tools.
+  2. **Safe Speculative Discards**: If an experiment goes down an invalid path, `cleanup --delete-branch` prunes the worktree without touching uncommitted changes in the main working tree.
+  3. **Controlled CLI Fast-Forward Merges**: Automating `create` -> test -> `merge --target <branch>` directly from shell/CI helpers.
 
 ---
 

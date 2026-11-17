@@ -38,6 +38,7 @@ def run_enforce(payload):
 
 def test_req_033_json_gate_in_enforce_delegation(tmp_path, monkeypatch):
     """REQ-033: enforce-delegation validates Message is JSON dict and runs verify_cmd."""
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AGY_APP_DATA_DIR", str(tmp_path))
     monkeypatch.delenv("AGY_DISABLE_JSON_GATE", raising=False)
 
@@ -260,7 +261,7 @@ def test_req_036_marketplace_manifest_and_assets():
 
     assert meta["name"] == "attention-guard"
     assert meta["displayName"] == "Attention Guard"
-    assert meta["version"] == "1.0.0"
+    assert meta["version"] == "1.1.0"
     assert "description" in meta and len(meta["description"]) > 20
     assert meta["logo"] == "assets/logo.svg"
     assert isinstance(meta.get("author"), dict) and meta["author"]["name"] == "Sam Hoang"

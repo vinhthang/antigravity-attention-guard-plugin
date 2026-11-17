@@ -4,7 +4,8 @@ Governs Executor subagents dispatched for deterministic Phase 2 task execution.
 </description>
 
 <constraints>
-- **Zero Delegation**: Executor subagents are strictly forbidden from delegating tasks further. Do not call `invoke_subagent` or `manage_subagents`.
+- **Zero Delegation**: Executor subagents are strictly forbidden from delegating tasks further. Do not call `invoke_subagent`, `manage_subagents`, `run_workflow`, or `swarm`.
+- **Isolated Workspace Hygiene**: When dispatched with `Workspace="share"` or `Workspace="branch"`, commit verified changes cleanly on your isolated workspace branch and report the branch/commit SHA in `notes` so the orchestrator can merge or cherry-pick before cleanup.
 - **Background Task Completion Fence**: Executor subagents must never fabricate `<system_message>` tags in responses and must never invoke `send_message` while any non-daemon background `run_command` task (`task-*`) remains running.
 - **Halting Invariant & TDD RED Reconciliation**:
   - Expected test failures during the initial TDD RED phase are permitted.

@@ -4,6 +4,8 @@ from typing import Optional, Dict, Any, List, Tuple
 sys.path.insert(0, os.path.dirname(__file__))
 from common import (
     is_subagent,
+    is_native_worker,
+    is_leaf_native_worker,
     get_turn_state,
     get_primary_model,
     is_thinking_model,
@@ -679,7 +681,11 @@ def main(argv=None, stdin=None, stdout=None):
                 return emit_deny(tamper_err)
 
         if not is_sub:
+            native_worker = is_native_worker(data)
+            native_leaf = is_leaf_native_worker(data) if native_worker else False
             if tool_name in ["manage_subagents", "default_api:manage_subagents"]:
+                if native_worker:
+                    return emit_deny("Attention Dilution Guard: Native swarm/workflow workers are forbidden from invoking subagents or nested workflows.")
                 action = args.get("Action")
                 now = time.time()
                 if action == "kill":
@@ -714,13 +720,15 @@ def main(argv=None, stdin=None, stdout=None):
                 model_name = get_primary_model(data)
                 parent_is_thinking = is_thinking_model(model_name)
                 ctx = {
-                    "is_sub": False,
+                    "is_sub": bool(native_worker),
                     "parent_is_thinking": parent_is_thinking,
                     "is_plan_active": is_plan_execution_active(data.get("transcriptPath", "")),
                 }
                 valid_json, err_reason, msg_dict = validate_json_handoff_message(args, payload_context=ctx)
                 if not valid_json:
                     return emit_deny(err_reason)
+                if native_worker:
+                    return emit({"decision": "allow"})
 
                 raw_rec = args.get("Recipient") if args.get("Recipient") is not None else args.get("recipient")
                 recipient = str(raw_rec or "").strip()
@@ -792,6 +800,29 @@ def main(argv=None, stdin=None, stdout=None):
                     return emit({"decision": "allow"})
                 return emit({"decision": "allow"})
 
+            if native_worker:
+                if tool_name in [
+                    "invoke_subagent", "run_workflow",
+                    "default_api:invoke_subagent", "default_api:run_workflow",
+                ]:
+                    return emit_deny("Attention Dilution Guard: Native swarm/workflow workers are forbidden from invoking subagents or nested workflows.")
+                if tool_name in ["swarm", "default_api:swarm"]:
+                    swarm_action = str(args.get("action") or "").strip().strip('"\'').lower() if isinstance(args, dict) else ""
+                    if swarm_action == "title":
+                        return emit_deny("Attention Dilution Guard: Native swarm/workflow workers are forbidden from calling coordinator-only swarm(action='title').")
+                    if swarm_action == "add" and native_leaf:
+                        return emit_deny("Attention Dilution Guard: Leaf native helpers and workflow workers are forbidden from spawning nested swarm workers.")
+                if tool_name in ["run_command", "default_api:run_command"]:
+                    conv_id = data.get("conversationId", "unknown")
+                    turn_id, _ = get_turn_state(data.get("transcriptPath", ""))
+                    doom_err = check_subagent_doom_loop(ledger, conv_id, str(turn_id), tool_name, args)
+                    if doom_err:
+                        return emit_deny(doom_err)
+                elif tool_name in MUTATION_TOOLS:
+                    conv_id = data.get("conversationId", "unknown")
+                    record_subagent_file_edit(conv_id, target_file, ledger)
+                return emit({"decision": "allow"})
+
             transcript_path = data.get("transcriptPath", "")
             artifact_dir = data.get("artifactDirectoryPath") or data.get("artifact_dir")
             if not artifact_dir:
@@ -844,6 +875,8 @@ def main(argv=None, stdin=None, stdout=None):
                 if not valid_json:
                     return emit_deny(err_reason)
                 return emit({"decision": "allow"})
+            if tool_name in ["run_workflow", "default_api:run_workflow", "swarm", "default_api:swarm"]:
+                return emit_deny("Attention Dilution Guard: Subagents are forbidden from invoking run_workflow or swarm.")
             if tool_name in ["invoke_subagent", "manage_subagents", "default_api:invoke_subagent", "default_api:manage_subagents"]:
                 if not may_delegate or remaining_depth <= 0:
                     return emit_deny("Attention Dilution Guard: Subagents are forbidden from delegating tasks further. Do not invoke or manage subagents.")

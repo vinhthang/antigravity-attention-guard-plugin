@@ -12,7 +12,7 @@
         ]
       },
       {
-        "matcher": "invoke_subagent",
+        "matcher": "invoke_subagent|swarm",
         "hooks": [
           {
             "type": "command",
