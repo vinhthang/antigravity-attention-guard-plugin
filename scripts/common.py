@@ -2,152 +2,12 @@ import sys
 import os
 import json
 import re
-import shlex
-from ledger import Ledger
-
-DEFAULT_THINKING_MODELS = ["opus", "gemini-4", "gemini 4", "argon", "carbon"]
-
-def _parse_positive_int_env(var_name: str):
-    raw = os.environ.get(var_name)
-    if raw is None or not raw.strip():
-        return None
-    try:
-        val = int(raw.strip())
-        return val if val > 0 else None
-    except (ValueError, TypeError):
-        return None
-
-def resolve_context_budget(model_name: str = "") -> tuple[int, int]:
-    """Resolve (token_budget, checkpoint_threshold) by model family and env overrides."""
-    name_lower = model_name.lower() if isinstance(model_name, str) else ""
-    if any(k in name_lower for k in ("gemini", "argon", "carbon")):
-        budget, threshold = 1_000_000, 400_000
-    elif any(k in name_lower for k in ("opus", "sonnet", "claude")):
-        budget, threshold = 200_000, 140_000
-    else:
-        budget, threshold = 128_000, 80_000
-
-    budget_override = _parse_positive_int_env("AGY_TOKEN_BUDGET")
-    thresh_override = _parse_positive_int_env("AGY_CHECKPOINT_THRESHOLD")
-    if budget_override is not None:
-        budget = budget_override
-        if thresh_override is None:
-            threshold = max(1, int(budget * 0.625))
-    if thresh_override is not None:
-        threshold = thresh_override
-    threshold = min(threshold, budget)
-    return budget, threshold
-
-def get_primary_model(data=None):
-    if isinstance(data, dict):
-        model = data.get("modelName") or data.get("model") or data.get("model_name")
-        if model:
-            return str(model).strip()
-    env_model = os.environ.get("AGY_PRIMARY_MODEL") or os.environ.get("ANTIGRAVITY_MODEL")
-    if env_model:
-        return env_model.strip()
-    return ""
-
-def is_thinking_model(model_name):
-    if not model_name or not isinstance(model_name, str):
-        return False
-    env_models = os.environ.get("ATTENTION_GUARD_THINKING_MODELS")
-    if env_models:
-        candidates = [m.strip().lower() for m in env_models.split(",") if m.strip()]
-    else:
-        candidates = [m.lower() for m in DEFAULT_THINKING_MODELS]
-    name_lower = model_name.lower()
-    return any(cand in name_lower for cand in candidates)
 
 def is_markdown_file(file_path):
     if not file_path or not isinstance(file_path, str):
         return False
     path_lower = file_path.lower()
     return path_lower.endswith(".md") or path_lower.endswith(".markdown")
-
-def is_build_command(cmd_str):
-    if not cmd_str or not isinstance(cmd_str, str):
-        return False
-    try:
-        tokens = shlex.split(cmd_str)
-    except Exception:
-        tokens = cmd_str.split()
-    while tokens and tokens[0] == "rtk":
-        tokens.pop(0)
-    if not tokens:
-        return False
-
-    bin_name = os.path.basename(tokens[0]).lower()
-    for ext in (".exe", ".cmd", ".bat"):
-        if bin_name.endswith(ext):
-            bin_name = bin_name[:-len(ext)]
-            break
-
-    # Direct build tools / generators
-    if bin_name in {"make", "cmake", "ninja"}:
-        return True
-
-    # Python pip
-    if bin_name in {"pip", "pip3"}:
-        return True
-
-    # python -m pip ... or python setup.py ...
-    if bin_name in {"python", "python3"}:
-        i = 1
-        while i < len(tokens):
-            arg = tokens[i]
-            if arg == "-m":
-                if i + 1 < len(tokens):
-                    return tokens[i + 1].lower() == "pip"
-                return False
-            if arg.startswith("-m") and len(arg) > 2:
-                return arg[2:].lower() == "pip"
-            if arg == "-c":
-                return False
-            if arg in {"-W", "-X", "--check-hash-based-pycs"}:
-                i += 2
-                continue
-            if arg.startswith("-"):
-                i += 1
-                continue
-            script_base = os.path.basename(arg).lower()
-            if script_base == "setup.py":
-                return any(t.lower() in {"build", "install", "bdist_wheel", "sdist", "develop"} for t in tokens[i + 1:])
-            return False
-        return False
-
-    # Cargo
-    if bin_name == "cargo":
-        lower_tokens = [t.lower() for t in tokens[1:]]
-        if any(t in {"build", "check", "install"} for t in lower_tokens):
-            return True
-
-    # Go
-    if bin_name == "go":
-        lower_tokens = [t.lower() for t in tokens[1:]]
-        if any(t in {"build", "install"} for t in lower_tokens):
-            return True
-
-    # Node / JS
-    if bin_name in {"npm", "pnpm", "yarn", "bun"}:
-        lower_tokens = [t.lower() for t in tokens[1:]]
-        if any(t in {"install", "i", "ci", "add", "build", "compile"} for t in lower_tokens):
-            return True
-        if "run" in lower_tokens and any(t in {"build", "compile"} for t in lower_tokens):
-            return True
-
-    # Java / JVM build tools
-    if bin_name in {"mvn", "mvnw"}:
-        lower_tokens = [t.lower() for t in tokens[1:]]
-        if any(t in {"compile", "install", "package", "verify", "build"} for t in lower_tokens):
-            return True
-
-    if bin_name in {"gradle", "gradlew"}:
-        lower_tokens = [t.lower() for t in tokens[1:]]
-        if any(t in {"build", "compile", "assemble", "install"} for t in lower_tokens):
-            return True
-
-    return False
 
 def get_cache_dir():
     base = os.environ.get("AGY_APP_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".gemini", "antigravity")
@@ -242,8 +102,6 @@ def parse_transcript(transcript_path: str) -> dict:
         "first_system_sender": None,
         "steps": [],
         "active_bg_tasks": [],
-        "active_timers_since_wakeup": [],
-        "has_delegation_in_turn": False,
         "active_context_chars": 0,
         "has_valid_json_steps": False,
     }
@@ -265,12 +123,9 @@ def parse_transcript(transcript_path: str) -> dict:
     first_system_sender = None
     steps = []
     active_bg_tasks = []
-    active_timers_since_wakeup = []
-    current_turn_delegated = False
     active_context_chars = 0
     has_valid_json_steps = False
     planner_tool_calls = []
-    valid_schedule_calls = []
 
     token_pattern = re.compile(r'\[ANTIGRAVITY_TOKEN:([a-fA-F0-9\-]+)\]')
     sender_pattern = re.compile(r'\bsender=([0-9a-fA-F\-]{36})\b')
@@ -315,11 +170,8 @@ def parse_transcript(transcript_path: str) -> dict:
 
                 if source.startswith("USER") and stype == "USER_INPUT":
                     turn_id = step.get("step_index", turn_id)
-                    current_turn_delegated = False
-                    active_timers_since_wakeup.clear()
 
                 if source == "SYSTEM" and stype == "SYSTEM_MESSAGE":
-                    active_timers_since_wakeup.clear()
                     content = str(step.get("content") or "")
                     for m in system_sender_task_pattern.finditer(content):
                         _remove_matching_task_id(active_bg_tasks, m.group(1))
@@ -343,34 +195,6 @@ def parse_transcript(transcript_path: str) -> dict:
                     tcs = step.get("tool_calls") or []
                     if isinstance(tcs, list):
                         planner_tool_calls = [tc for tc in tcs if isinstance(tc, dict)]
-                        if any(
-                            isinstance(tc, dict)
-                            and tc.get("name") in (
-                                "invoke_subagent", "default_api:invoke_subagent",
-                                "send_message", "default_api:send_message",
-                                "run_workflow", "default_api:run_workflow",
-                                "swarm", "default_api:swarm",
-                            )
-                            for tc in tcs
-                        ):
-                            current_turn_delegated = True
-                        for tc in tcs:
-                            if isinstance(tc, dict) and tc.get("name") in ("schedule", "default_api:schedule"):
-                                args = tc.get("args") or {}
-                                dur_raw = args.get("DurationSeconds")
-                                cron_raw = args.get("CronExpression")
-                                cond_raw = str(args.get("TimerCondition") or "never").strip().lower().strip('"\'')
-                                # REQ-028: Watchdog timer requires DurationSeconds (>= 60s), not a cron schedule
-                                if not cron_raw and dur_raw is not None:
-                                    try:
-                                        dur_val = int(dur_raw)
-                                        if dur_val >= 60 and cond_raw in ("any", "never"):
-                                            valid_schedule_calls.append(tc)
-                                            call_key = f"schedule_call_{step.get('step_index', idx)}"
-                                            if call_key not in active_timers_since_wakeup:
-                                                active_timers_since_wakeup.append(call_key)
-                                    except (ValueError, TypeError) as conv_err:
-                                        _ = conv_err
 
                 if stype == "GENERIC":
                     content = str(step.get("content") or "")
@@ -391,18 +215,13 @@ def parse_transcript(transcript_path: str) -> dict:
                             path_parts = abs_p.split(os.sep)
                             if "brain" in path_parts:
                                 brain_idx = path_parts.index("brain")
-                                if brain_idx + 1 < len(path_parts):
-                                    conv_from_path = path_parts[brain_idx + 1]
-                                    is_own_task = task_id.startswith(f"{conv_from_path}/")
+                                after_brain = path_parts[brain_idx + 1 : brain_idx + 2]
+                                if after_brain:
+                                    is_own_task = task_id.startswith(f"{after_brain[0]}/")
                         if is_own_task:
                             m_desc = task_desc_pattern.search(content)
                             desc = m_desc.group(1).strip() if m_desc else ""
-                            if desc.startswith("Timer:"):
-                                if valid_schedule_calls:
-                                    valid_schedule_calls.pop(0)
-                                    if task_id not in active_timers_since_wakeup:
-                                        active_timers_since_wakeup.append(task_id)
-                            elif not desc.startswith("Cron:"):
+                            if not desc.startswith(("Timer:", "Cron:")):
                                 matched_tc = _pop_matching_planner_call(
                                     planner_tool_calls,
                                     desc,
@@ -430,11 +249,6 @@ def parse_transcript(transcript_path: str) -> dict:
                     if m_cancel:
                         cancelled_id = m_cancel.group(1).strip()
                         _remove_matching_task_id(active_bg_tasks, cancelled_id)
-                        _remove_matching_task_id(active_timers_since_wakeup, cancelled_id)
-                        for t in reversed(list(active_timers_since_wakeup)):
-                            if t.startswith("schedule_call_"):
-                                active_timers_since_wakeup.remove(t)
-                                break
 
         result = {
             "turn_id": turn_id,
@@ -443,8 +257,6 @@ def parse_transcript(transcript_path: str) -> dict:
             "first_system_sender": first_system_sender,
             "steps": steps,
             "active_bg_tasks": active_bg_tasks,
-            "active_timers_since_wakeup": active_timers_since_wakeup,
-            "has_delegation_in_turn": current_turn_delegated,
             "active_context_chars": active_context_chars,
             "has_valid_json_steps": has_valid_json_steps,
         }
@@ -454,173 +266,200 @@ def parse_transcript(transcript_path: str) -> dict:
         sys.stderr.write(f"Warning in parse_transcript: {exc}\n")
         return empty_result
 
-def get_turn_state(transcript_path):
-    parsed = parse_transcript(transcript_path)
-    return parsed["turn_id"], parsed["lines_count"]
-
-def is_subagent(data, ledger=None):
-    transcript_path = data.get("transcriptPath", "")
+def scan_transcript_header(transcript_path: str, max_lines: int = 10) -> dict:
+    empty = {
+        "turn_id": 0,
+        "lines_scanned": 0,
+        "tokens": [],
+        "first_system_sender": None,
+    }
     if not transcript_path or not os.path.exists(transcript_path):
-        return False, False, 0, None, None
+        return empty
 
-    conv_id = data.get("conversationId", "unknown")
-    parsed = parse_transcript(transcript_path)
-    turn_id = parsed["turn_id"]
-    tokens = parsed["tokens"]
+    tokens: list[str] = []
+    first_system_sender: str | None = None
+    turn_id = 0
+    lines_scanned = 0
+    token_pattern = re.compile(r'\[ANTIGRAVITY_TOKEN:([a-fA-F0-9\-]+)\]')
+    sender_pattern = re.compile(r'\bsender=([0-9a-fA-F\-]{36})\b')
 
     try:
+        with open(os.path.abspath(transcript_path), "r", encoding="utf-8", errors="replace") as f:
+            while lines_scanned < max_lines:
+                raw_line = f.readline(65536)
+                if not raw_line:
+                    break
+                if not raw_line.endswith("\n"):
+                    while True:
+                        chunk = f.readline(65536)
+                        if not chunk or chunk.endswith("\n"):
+                            break
+                line_str = raw_line.strip()
+                if not line_str:
+                    continue
+                lines_scanned += 1
+                try:
+                    step = json.loads(line_str)
+                except Exception:
+                    if '"PLANNER_RESPONSE"' not in line_str and (
+                        '"USER_INPUT"' in line_str or '"SYSTEM_MESSAGE"' in line_str
+                    ):
+                        for match in token_pattern.finditer(line_str):
+                            tok = match.group(1)
+                            if tok not in tokens:
+                                tokens.append(tok)
+                        if lines_scanned == 1 and '"SYSTEM_MESSAGE"' in line_str:
+                            m = sender_pattern.search(line_str)
+                            if m:
+                                first_system_sender = m.group(1)
+                    continue
+                if not isinstance(step, dict):
+                    continue
+                source = str(step.get("source", ""))
+                stype = step.get("type", "")
+                if source.startswith("USER") and stype == "USER_INPUT":
+                    turn_id = step.get("step_index", turn_id)
+                if stype in ("USER_INPUT", "SYSTEM_MESSAGE"):
+                    content = str(step.get("content") or "")
+                    for match in token_pattern.finditer(content):
+                        tok = match.group(1)
+                        if tok not in tokens:
+                            tokens.append(tok)
+                if lines_scanned == 1 and source == "SYSTEM" and stype == "SYSTEM_MESSAGE":
+                    content = str(step.get("content") or "")
+                    m = sender_pattern.search(content)
+                    if m:
+                        first_system_sender = m.group(1)
+    except Exception as exc:
+        sys.stderr.write(f"Warning in scan_transcript_header: {exc}\n")
+
+    return {
+        "turn_id": turn_id,
+        "lines_scanned": lines_scanned,
+        "tokens": tokens,
+        "first_system_sender": first_system_sender,
+    }
+
+
+def extract_active_bg_tasks(transcript_path: str) -> list[str]:
+    if not transcript_path or not os.path.exists(transcript_path):
+        return []
+    return list(parse_transcript(transcript_path).get("active_bg_tasks") or [])
+
+
+def validate_no_raw_log_dump(text: str) -> tuple[bool, str | None]:
+    if not isinstance(text, str) or not text:
+        return True, None
+    if re.search(r"\x1b\[", text):
+        return (
+            False,
+            "Attention Guard: Raw ANSI escape sequence detected in send_message; summarize cleanly without terminal logs.",
+        )
+    tb_frames = re.findall(r'File "[^"]+", line \d+', text)
+    if len(tb_frames) >= 4:
+        return (
+            False,
+            f"Attention Guard: Raw traceback ({len(tb_frames)} traceback frames detected) in send_message; summarize root cause concisely.",
+        )
+    if "=== test session starts ===" in text and len(text) > 2000:
+        return (
+            False,
+            "Attention Guard: Raw pytest output ('=== test session starts ===' > 2,000 chars) detected in send_message; report concise test counts instead.",
+        )
+    return True, None
+
+
+def is_subagent(data, ledger=None):
+    conv_id = data.get("conversationId", "unknown") if isinstance(data, dict) else "unknown"
+    transcript_path = data.get("transcriptPath", "") if isinstance(data, dict) else ""
+
+    try:
+        header = None
+        if transcript_path and os.path.exists(transcript_path):
+            header = scan_transcript_header(transcript_path, max_lines=10)
+            allow_sender = os.environ.get("AGY_DISABLE_SENDER_FALLBACK") != "1"
+            if (
+                header["lines_scanned"] > 0
+                and not header["tokens"]
+                and (not allow_sender or not header["first_system_sender"])
+            ):
+                return False, False, 0, None, None
+
+        if ledger is None:
+            from ledger import Ledger
+            ledger = Ledger()
+
+        claimed_tok = ledger.get_claimed_token_by_conv(conv_id)
+        if claimed_tok is not None:
+            parent_conv_id = claimed_tok.get("parent_conv_id") or ""
+            if parent_conv_id != conv_id:
+                return (
+                    True,
+                    bool(claimed_tok.get("may_delegate", 0)),
+                    int(claimed_tok.get("remaining_depth", 0)),
+                    parent_conv_id or "unknown",
+                    "0",
+                )
+
+        if header is None:
+            return False, False, 0, None, None
+
+        turn_id = header["turn_id"]
+        tokens = header["tokens"]
+
         if tokens:
-            if ledger is None:
-                ledger = Ledger()
             for token in reversed(tokens):
-                with ledger._get_connection() as conn:
-                    cursor = conn.execute(
-                        "SELECT payload FROM events WHERE type = 'WORK_PREPARED' AND payload LIKE ?",
-                        (f'%"{token}"%',),
-                    )
-                    row = cursor.fetchone()
+                tok_row = ledger.get_token(token)
+                found_source = tok_row is not None
+                may_delegate = bool(tok_row.get("may_delegate", 0)) if tok_row else False
+                remaining_depth = int(tok_row.get("remaining_depth", 0)) if tok_row else 0
+                parent_conv_id = (tok_row.get("parent_conv_id") or "") if tok_row else ""
+                parent_turn_id = "0"
+
+                if not tok_row or not parent_conv_id:
+                    with ledger._get_connection() as conn:
+                        row = conn.execute(
+                            "SELECT payload FROM events WHERE type = 'WORK_PREPARED' AND payload LIKE ?",
+                            (f'%"{token}"%',),
+                        ).fetchone()
                     if row:
+                        found_source = True
                         payload_data = json.loads(row[0])
-                        may_delegate = payload_data.get("may_delegate", False)
-                        remaining_depth = payload_data.get("remaining_depth", 0)
-                        parent_conv_id = payload_data.get("parent_conv_id", "unknown")
-                        parent_turn_id = payload_data.get("parent_turn_id", "unknown")
+                        may_delegate = bool(payload_data.get("may_delegate", may_delegate))
+                        remaining_depth = int(payload_data.get("remaining_depth", remaining_depth))
+                        parent_conv_id = str(payload_data.get("parent_conv_id") or parent_conv_id or "unknown")
+                        parent_turn_id = str(payload_data.get("parent_turn_id") or "0")
 
-                        if conv_id == parent_conv_id:
-                            continue
+                if not found_source:
+                    continue
 
-                        w_row = conn.execute(
-                            "SELECT parent_conv_id, parent_turn_id FROM work_items WHERE work_id = ?",
-                            (token,)
-                        ).fetchone()
-                        if w_row:
-                            if w_row[0]:
-                                parent_conv_id = w_row[0]
-                            if w_row[1]:
-                                parent_turn_id = w_row[1]
+                if parent_conv_id and conv_id == parent_conv_id:
+                    continue
 
-                        t_row = conn.execute(
-                            "SELECT claimed, claimed_by FROM tokens WHERE token_id = ?",
-                            (token,)
-                        ).fetchone()
-                        newly_claimed = (t_row is None or t_row[0] == 0 or t_row[1] is None)
-
-                        if ledger.claim_token(token, conv_id):
-                            if newly_claimed:
-                                ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "WORK_CLAIMED")
-                                ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "RUNNING")
-                            return True, may_delegate, remaining_depth, parent_conv_id, parent_turn_id
+                newly_claimed = (
+                    tok_row is None
+                    or tok_row.get("claimed", 0) == 0
+                    or tok_row.get("claimed_by") is None
+                )
+                if ledger.claim_token(token, conv_id):
+                    if newly_claimed:
+                        ledger.insert_event(conv_id, str(turn_id), "init", "0", token, "WORK_CLAIMED")
+                    return (
+                        True,
+                        may_delegate,
+                        remaining_depth,
+                        parent_conv_id or "unknown",
+                        parent_turn_id,
+                    )
 
         if os.environ.get("AGY_DISABLE_SENDER_FALLBACK") != "1":
-            parent_conv_id = parsed.get("first_system_sender")
+            parent_conv_id = header.get("first_system_sender")
             if parent_conv_id and parent_conv_id != conv_id:
-                parent_turn_id = "0"
-                if ledger is None:
-                    ledger = Ledger()
-                with ledger._get_connection() as conn:
-                    w_row = conn.execute(
-                        """
-                        SELECT w.parent_conv_id, w.parent_turn_id
-                        FROM work_items w
-                        LEFT JOIN tokens t ON w.work_id = t.token_id
-                        WHERE t.claimed_by = ? OR w.work_id = ?
-                        ORDER BY w.updated_at DESC, w.created_at DESC
-                        LIMIT 1
-                        """,
-                        (conv_id, conv_id)
-                    ).fetchone()
-                    if w_row:
-                        if w_row[0]:
-                            parent_conv_id = w_row[0]
-                        if w_row[1]:
-                            parent_turn_id = w_row[1]
-                return True, False, 0, parent_conv_id, parent_turn_id
+                return True, False, 0, parent_conv_id, "0"
 
     except Exception as exc:
         sys.stderr.write(f"Error in is_subagent: {exc}\n")
 
     return False, False, 0, None, None
-
-
-def _classify_native_worker(data: dict, parsed: dict | None = None) -> tuple[bool, bool]:
-    """Return (is_worker, is_leaf) for Antigravity 2.0 native swarm/workflow workers."""
-    if isinstance(data, dict):
-        if any(bool(data.get(k)) for k in ("workflowId", "isWorkflowAgent")):
-            return True, True
-        if any(bool(data.get(k)) for k in ("swarmMember", "isSwarmWorker")):
-            return True, False
-
-    if parsed is None:
-        transcript_path = data.get("transcriptPath", "") if isinstance(data, dict) else ""
-        if not transcript_path or not os.path.exists(transcript_path):
-            return False, False
-        parsed = parse_transcript(transcript_path)
-
-    worker_kind = None
-    saw_coordinator_or_human = False
-    for _, _, step in parsed.get("steps", []):
-        if not isinstance(step, dict):
-            continue
-        stype = step.get("type", "")
-        source = str(step.get("source") or "")
-        if stype in ("USER_INPUT", "SYSTEM_MESSAGE"):
-            content = str(step.get("content") or "")
-            has_user_req_tag = source == "USER_EXPLICIT" and bool(re.search(r"(?:^|\n)\s*<USER_REQUEST>(?:\s|\n|>|$)", content))
-            if has_user_req_tag:
-                saw_coordinator_or_human = True
-                worker_kind = None
-                continue
-            if stype == "SYSTEM_MESSAGE" and ("[Message] timestamp=" in content or re.search(r"\bsender=", content)):
-                continue
-            has_swarm_tag = bool(re.search(r"(?:^|\n)\s*<swarm_worker>(?:\s|\n|$)", content))
-            has_workflow_prefix = content.lstrip().startswith("[AGY_WORKFLOW_WORKER]")
-            has_swarm_worker_end = bool(re.search(r"(?:^|\n)\[AGY_SWARM_WORKER\]\s*$", content.strip()))
-            has_swarm_helper_end = bool(re.search(r"(?:^|\n)\[AGY_SWARM_HELPER\]\s*$", content.strip()))
-            if source == "USER_EXPLICIT" and not (
-                has_swarm_tag or has_workflow_prefix or has_swarm_worker_end or has_swarm_helper_end
-            ):
-                saw_coordinator_or_human = True
-                worker_kind = None
-                continue
-            if not saw_coordinator_or_human:
-                if has_swarm_helper_end:
-                    worker_kind = "swarm_helper"
-                elif has_workflow_prefix:
-                    worker_kind = "workflow"
-                elif has_swarm_tag or has_swarm_worker_end:
-                    worker_kind = "swarm_worker"
-            elif (
-                stype == "USER_INPUT"
-                and source != "USER_EXPLICIT"
-                and not re.search(r"\bsender=", content)
-                and (has_swarm_worker_end or has_swarm_helper_end)
-            ):
-                worker_kind = "swarm_helper" if has_swarm_helper_end else "swarm_worker"
-        elif stype == "PLANNER_RESPONSE":
-            for tc in step.get("tool_calls") or []:
-                if not isinstance(tc, dict):
-                    continue
-                tname = tc.get("name")
-                if tname in ("invoke_subagent", "default_api:invoke_subagent", "run_workflow", "default_api:run_workflow"):
-                    saw_coordinator_or_human = True
-                    worker_kind = None
-                    break
-                if tname in ("swarm", "default_api:swarm"):
-                    action = str((tc.get("args") or {}).get("action") or "").strip().strip('"\'').lower()
-                    if action == "title":
-                        saw_coordinator_or_human = True
-                        worker_kind = None
-                        break
-    return worker_kind is not None, worker_kind in ("swarm_helper", "workflow")
-
-
-def is_native_worker(data: dict, parsed: dict | None = None) -> bool:
-    """Return True when payload or transcript identifies an Antigravity 2.0 native swarm/workflow worker."""
-    return _classify_native_worker(data, parsed=parsed)[0]
-
-
-def is_leaf_native_worker(data: dict, parsed: dict | None = None) -> bool:
-    """Return True for leaf native workers ([AGY_SWARM_HELPER], [AGY_WORKFLOW_WORKER], workflowId/isWorkflowAgent)."""
-    return _classify_native_worker(data, parsed=parsed)[1]
 
 

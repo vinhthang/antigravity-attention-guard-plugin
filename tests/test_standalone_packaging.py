@@ -37,15 +37,16 @@ def run_enforce(payload):
 
 
 def test_req_033_json_gate_in_enforce_delegation(tmp_path, monkeypatch):
-    """REQ-033: enforce-delegation validates Message is JSON dict and runs verify_cmd."""
+    """Lean v2: send_message allows Markdown/JSON without shell verify_cmd, blocking only subagent raw log dumps."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AGY_APP_DATA_DIR", str(tmp_path))
-    monkeypatch.delenv("AGY_DISABLE_JSON_GATE", raising=False)
 
     p_transcript = tmp_path / "transcript.jsonl"
-    p_transcript.write_text(json.dumps({"source": "USER", "type": "USER_INPUT", "step_index": 1, "content": "hi"}) + "\n")
+    p_transcript.write_text(
+        json.dumps({"source": "USER", "type": "USER_INPUT", "step_index": 1, "content": "hi"}) + "\n",
+        encoding="utf-8",
+    )
 
-    # 1. Non-JSON string Message -> deny
     res1 = run_enforce({
         "conversationId": "parent-1",
         "transcriptPath": str(p_transcript),
@@ -53,14 +54,12 @@ def test_req_033_json_gate_in_enforce_delegation(tmp_path, monkeypatch):
             "name": "send_message",
             "args": {
                 "Recipient": "worker-1",
-                "Message": "Here is plain text instead of JSON"
+                "Message": "Here is plain text summary"
             }
         }
     })
-    assert res1["decision"] == "deny"
-    assert "Handoff MUST be valid JSON. No conversational fluff." in res1["reason"]
+    assert res1["decision"] == "allow"
 
-    # 2. JSON list instead of dict -> deny
     res2 = run_enforce({
         "conversationId": "parent-1",
         "transcriptPath": str(p_transcript),
@@ -68,102 +67,12 @@ def test_req_033_json_gate_in_enforce_delegation(tmp_path, monkeypatch):
             "name": "send_message",
             "args": {
                 "Recipient": "worker-1",
-                "Message": json.dumps(["not", "a", "dict"])
+                "Message": json.dumps({"task": "run", "verify_cmd": "touch should_not_exist"})
             }
         }
     })
-    assert res2["decision"] == "deny"
-    assert "Handoff MUST be valid JSON. No conversational fluff." in res2["reason"]
-
-    # 3. Failing verify_cmd -> deny with Verification Failed
-    res3 = run_enforce({
-        "conversationId": "parent-1",
-        "transcriptPath": str(p_transcript),
-        "toolCall": {
-            "name": "send_message",
-            "args": {
-                "Recipient": "worker-1",
-                "Message": json.dumps({"task": "run", "verify_cmd": "exit 42"})
-            }
-        }
-    })
-    assert res3["decision"] == "deny"
-    assert "Verification Failed:" in res3["reason"]
-
-    # 4. Passing verify_cmd with valid JSON dict -> allow
-    res4 = run_enforce({
-        "conversationId": "parent-1",
-        "transcriptPath": str(p_transcript),
-        "toolCall": {
-            "name": "send_message",
-            "args": {
-                "Recipient": "worker-1",
-                "Message": json.dumps({"task": "run", "verify_cmd": "exit 0"})
-            }
-        }
-    })
-    assert res4["decision"] == "allow"
-
-    # 5. Non-string verify_cmd -> deny
-    res5_type = run_enforce({
-        "conversationId": "parent-1",
-        "transcriptPath": str(p_transcript),
-        "toolCall": {
-            "name": "send_message",
-            "args": {
-                "Recipient": "worker-1",
-                "Message": json.dumps({"task": "run", "verify_cmd": 12345})
-            }
-        }
-    })
-    assert res5_type["decision"] == "deny"
-    assert "verify_cmd must be a string" in res5_type["reason"]
-
-    # 6. Destructive command in verify_cmd -> deny
-    res6_dest = run_enforce({
-        "conversationId": "parent-1",
-        "transcriptPath": str(p_transcript),
-        "toolCall": {
-            "name": "send_message",
-            "args": {
-                "Recipient": "worker-1",
-                "Message": json.dumps({"task": "run", "verify_cmd": "git reset --hard"})
-            }
-        }
-    })
-    assert res6_dest["decision"] == "deny"
-    assert "destructive command rejected" in res6_dest["reason"]
-
-    # 7. Thinking model Primary Agent executing test command via verify_cmd -> deny
-    res7_think = run_enforce({
-        "conversationId": "parent-1",
-        "transcriptPath": str(p_transcript),
-        "modelName": "Opus 4",
-        "toolCall": {
-            "name": "send_message",
-            "args": {
-                "Recipient": "worker-1",
-                "Message": json.dumps({"task": "run", "verify_cmd": "pytest tests/"})
-            }
-        }
-    })
-    assert res7_think["decision"] == "deny"
-    assert "Primary Agent under thinking model is forbidden" in res7_think["reason"]
-
-    # 8. AGY_DISABLE_JSON_GATE=1 escape hatch -> allow plain text
-    monkeypatch.setenv("AGY_DISABLE_JSON_GATE", "1")
-    res8 = run_enforce({
-        "conversationId": "parent-1",
-        "transcriptPath": str(p_transcript),
-        "toolCall": {
-            "name": "send_message",
-            "args": {
-                "Recipient": "worker-1",
-                "Message": "Conversational plain text message allowed when gate disabled"
-            }
-        }
-    })
-    assert res8["decision"] == "allow"
+    assert res2["decision"] == "allow"
+    assert not (tmp_path / "should_not_exist").exists()
 
 
 def test_req_034_templates_resolution_in_inject_rules(tmp_path, monkeypatch):
@@ -219,19 +128,17 @@ def test_req_034_templates_resolution_in_inject_rules(tmp_path, monkeypatch):
 
 
 def test_req_034_consolidated_agents_md_budget_and_cleanliness():
-    """REQ-034: rules/AGENTS.md is consolidated, <= 8000 chars, no /Users/thanghoang paths, and has skill triggers."""
+    """REQ-046: rules/AGENTS.md is consolidated, <= 4000 chars, no /Users/thanghoang paths, and has skill triggers."""
     agents_file = REPO_ROOT / "rules" / "AGENTS.md"
     assert agents_file.is_file()
     content = agents_file.read_text(encoding="utf-8")
 
-    assert len(content) <= 8000, f"rules/AGENTS.md must be <= 8000 chars, got {len(content)}"
+    assert len(content) <= 4000, f"rules/AGENTS.md must be <= 4000 chars, got {len(content)}"
     assert "/Users/thanghoang" not in content, "rules/AGENTS.md must not contain hardcoded user home paths"
     assert "consult skill `attention-metrics`" in content
     assert "consult skill `git-worktree-sandbox`" in content
     assert "agent-delegation" in content
-    assert "explicit-approval" in content
     assert "no-error-suppression" in content
-    assert "reasoning-quality" in content
 
 
 def test_req_035_git_worktree_sandbox_bundled_and_portable():
@@ -261,7 +168,7 @@ def test_req_036_marketplace_manifest_and_assets():
 
     assert meta["name"] == "attention-guard"
     assert meta["displayName"] == "Attention Guard"
-    assert meta["version"] == "1.1.0"
+    assert meta["version"] == "2.0.0"
     assert "description" in meta and len(meta["description"]) > 20
     assert meta["logo"] == "assets/logo.svg"
     assert isinstance(meta.get("author"), dict) and meta["author"]["name"] == "Sam Hoang"

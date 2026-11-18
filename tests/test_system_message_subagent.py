@@ -8,7 +8,7 @@ import uuid
 import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts')))
-from common import is_subagent, is_build_command
+from common import is_subagent
 
 spec_enforce = importlib.util.spec_from_file_location(
     "enforce_delegation",
@@ -83,13 +83,4 @@ def test_is_test_command_script_boundary():
     assert is_test_command("rtk python3 -m pytest.runner") is True
     assert is_test_command("rtk python3 -c 'print(1)'") is False
     assert is_test_command("rtk pytest -v") is True
-
-def test_is_build_command_script_boundary():
-    # AC-003-2: script args containing "pip" must NOT trigger is_build_command
-    assert is_build_command("rtk python3 script.py --arg pip") is False
-    assert is_build_command("rtk python3 -m pip install requests") is True
-    assert is_build_command("rtk python3 -m pip.run install requests") is False
-    assert is_build_command("rtk python3 setup.py build") is True
-    assert is_build_command("rtk python3 setup.py test") is False
-    assert is_build_command("rtk pip install requests") is True
 

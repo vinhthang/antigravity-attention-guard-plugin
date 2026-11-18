@@ -41,13 +41,25 @@ def _extract_script_paths_from_command(command_str: str, base_dir: Path) -> List
 
     results: List[Tuple[str, Path]] = []
     # Skip standard interpreters / wrappers
-    interpreters = {"python", "python3", "bash", "sh", "node", "env"}
+    interpreters = {"python", "python3", "bash", "sh", "zsh", "node", "env"}
 
-    for token in tokens:
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token in {"-c", "-e"}:
+            # Next argument is an inline code string, not a script file path
+            i += 2
+            continue
         if token.startswith("-"):
+            i += 1
+            continue
+        if "=" in token and not token.startswith(("/", ".", "~")):
+            # Leading KEY=VALUE env assignment
+            i += 1
             continue
         token_base = os.path.basename(token).lower()
         if token_base in interpreters:
+            i += 1
             continue
         # Look for tokens that end with common script extensions or contain a path separator
         if (
@@ -65,6 +77,7 @@ def _extract_script_paths_from_command(command_str: str, base_dir: Path) -> List
             else:
                 resolved = (base_dir / raw_path).resolve()
             results.append((raw_path, resolved))
+        i += 1
 
     return results
 
@@ -216,12 +229,7 @@ def audit_agents_dir(plugin_dir: Path) -> Tuple[bool, List[str]]:
 
 
 def audit_sqlite_ledger(db_path: Path, repair: bool = False) -> Tuple[bool, List[str], Dict[str, Any]]:
-    """Audit attention_guard.db ledger table counts and optionally repair stale rows.
-
-    If repair=True:
-        - Marks stale ACTIVE work_items older than 3600s as TERMINATED.
-        - Deletes TIMED_OUT work_items older than 86400s so the ledger stays clean.
-    """
+    """Audit attention_guard.db ledger table counts (tokens + events) and optionally prune stale rows."""
     p = Path(db_path).resolve()
     errors: List[str] = []
     stats: Dict[str, Any] = {
@@ -233,39 +241,32 @@ def audit_sqlite_ledger(db_path: Path, repair: bool = False) -> Tuple[bool, List
         errors.append(f"SQLite ledger database not found: {p}")
         return False, errors, stats
 
-    now = time.time()
     try:
         conn = sqlite3.connect(str(p), timeout=5.0)
         conn.row_factory = sqlite3.Row
 
-        # Tables census
         tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
         stats["tables"] = tables
 
-        work_items_counts: Dict[str, int] = {}
-        if "work_items" in tables:
-            rows = conn.execute("SELECT status, count(*) FROM work_items GROUP BY status").fetchall()
-            for r in rows:
-                work_items_counts[str(r[0])] = int(r[1])
-            total_work_items = conn.execute("SELECT count(*) FROM work_items").fetchone()[0]
+        if "tokens" in tables:
+            total_tokens = conn.execute("SELECT count(*) FROM tokens").fetchone()[0]
+            claimed_tokens = conn.execute("SELECT count(*) FROM tokens WHERE claimed = 1").fetchone()[0]
         else:
-            errors.append("Table 'work_items' missing from SQLite ledger")
-            total_work_items = 0
+            errors.append("Table 'tokens' missing from SQLite ledger")
+            total_tokens = 0
+            claimed_tokens = 0
 
-        stats["work_items"] = {
-            "total": total_work_items,
-            "counts": work_items_counts,
-            "completed": work_items_counts.get("COMPLETED", 0),
-            "active": work_items_counts.get("ACTIVE", 0),
-            "timed_out": work_items_counts.get("TIMED_OUT", 0),
-            "failed": work_items_counts.get("FAILED", 0),
-            "terminated": work_items_counts.get("TERMINATED", 0),
+        stats["tokens"] = {
+            "total": total_tokens,
+            "claimed": claimed_tokens,
+            "unclaimed": max(0, total_tokens - claimed_tokens),
         }
 
         if "events" in tables:
             total_events = conn.execute("SELECT count(*) FROM events").fetchone()[0]
             event_counts = dict(conn.execute("SELECT type, count(*) FROM events GROUP BY type").fetchall())
         else:
+            errors.append("Table 'events' missing from SQLite ledger")
             total_events = 0
             event_counts = {}
 
@@ -278,68 +279,16 @@ def audit_sqlite_ledger(db_path: Path, repair: bool = False) -> Tuple[bool, List
             from ledger import Ledger
             ledger = Ledger(str(p))
             prune_stats = ledger.prune()
-
-            repaired_active = 0
-            deleted_timeout = 0
-            if "work_items" in tables:
-                # 1. Mark stale ACTIVE older than 3600s as TERMINATED
-                active_cutoff = now - 3600.0
-                cur_active = conn.execute(
-                    "UPDATE work_items SET status = 'TERMINATED', updated_at = ? "
-                    "WHERE status = 'ACTIVE' AND COALESCE(updated_at, created_at) < ?",
-                    (now, active_cutoff),
-                )
-                repaired_active = cur_active.rowcount
-
-                # 2. Mark unclaimed orphaned PreToolUse work items (>300s old) as TERMINATED
-                cur_orphaned = conn.execute(
-                    "UPDATE work_items SET status = 'TERMINATED', updated_at = ? "
-                    "WHERE status = 'ACTIVE' AND parent_conv_id IS NOT NULL "
-                    "AND COALESCE(updated_at, created_at) < ? "
-                    "AND work_id IN ("
-                    "  SELECT w.work_id FROM work_items w "
-                    "  LEFT JOIN tokens t ON w.work_id = t.token_id "
-                    "  WHERE w.status = 'ACTIVE' AND COALESCE(t.claimed, 0) = 0 "
-                    "  AND EXISTS ("
-                    "    SELECT 1 FROM events ep "
-                    "    WHERE ep.type = 'WORK_PREPARED' AND ep.event_id LIKE '%' || w.work_id || '%'"
-                    "  ) "
-                    "  AND NOT EXISTS ("
-                    "    SELECT 1 FROM events eh "
-                    "    WHERE eh.event_id = w.parent_conv_id || '_' || w.parent_turn_id || '_PostToolUse_' || w.step_idx || '_invoke_HANDOFF_ACCEPTED'"
-                    "  )"
-                    ")",
-                    (now, now - 300.0),
-                )
-                repaired_active += cur_orphaned.rowcount
-
-                # 2. Delete TIMED_OUT older than 86400s
-                timeout_cutoff = now - 86400.0
-                cur_timeout = conn.execute(
-                    "DELETE FROM work_items WHERE status = 'TIMED_OUT' AND COALESCE(updated_at, created_at) < ?",
-                    (timeout_cutoff,),
-                )
-                deleted_timeout = cur_timeout.rowcount
-
             conn.commit()
             conn.execute("VACUUM")
-
             stats["repair"] = {
-                "active_marked_terminated": repaired_active,
-                "stale_timed_out_deleted": deleted_timeout,
                 "prune": prune_stats,
                 **prune_stats,
             }
-
-            # Refresh counts post-repair
-            if "work_items" in tables:
-                repaired_counts = dict(
-                    conn.execute("SELECT status, count(*) FROM work_items GROUP BY status").fetchall()
-                )
-                stats["work_items"]["counts_after_repair"] = repaired_counts
-                stats["work_items"]["total_after_repair"] = conn.execute(
-                    "SELECT count(*) FROM work_items"
-                ).fetchone()[0]
+            if "tokens" in tables:
+                stats["tokens"]["total_after_repair"] = conn.execute("SELECT count(*) FROM tokens").fetchone()[0]
+            if "events" in tables:
+                stats["events"]["total_after_repair"] = conn.execute("SELECT count(*) FROM events").fetchone()[0]
 
         conn.close()
     except Exception as exc:
@@ -501,9 +450,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"  [{status}] {pname} ({pdata.get('path', '')})")
 
         print(f"\n--- SQLite Ledger ({report['ledger'].get('db_path', '')}) ---")
-        l_stats = report["ledger"].get("work_items", {})
-        print(f"  Total Work Items: {l_stats.get('total', 0)}")
-        print(f"  Counts Breakdown: {l_stats.get('counts', {})}")
+        tok_stats = report["ledger"].get("tokens", {})
+        ev_stats = report["ledger"].get("events", {})
+        print(f"  Tokens: {tok_stats.get('total', 0)} (claimed: {tok_stats.get('claimed', 0)})")
+        print(f"  Events: {ev_stats.get('total', 0)} ({ev_stats.get('counts_by_type', {})})")
         if "repair" in report["ledger"]:
             print(f"  Repairs Executed: {report['ledger']['repair']}")
 

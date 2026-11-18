@@ -31,7 +31,6 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import common
-from fsm import FSM, Event, State
 from ledger import Ledger
 
 
@@ -48,8 +47,6 @@ def _load_script_module(name: str, filename: str):
 
 enforce_mod = _load_script_module("enforce_delegation_e2e", "enforce-delegation.py")
 inject_mod = _load_script_module("inject_rules_e2e", "inject-rules.py")
-record_mod = _load_script_module("record_tool_result_e2e", "record-tool-result.py")
-attention_check_mod = _load_script_module("attention_check_e2e", "attention-check.py")
 system_audit_mod = _load_script_module("system_audit_e2e", "system_audit.py")
 
 
@@ -105,15 +102,12 @@ def e2e_env(tmp_path, monkeypatch):
 # Test 1: Full Primary + Subagent Lifecycle with NO_TOOL_CALL (REQ-014, REQ-015)
 # ============================================================================
 
-def test_full_primary_and_subagent_lifecycle_with_no_tool_call(e2e_env):
-    """Verify the entire multi-hook lifecycle using Antigravity 2.0 payloads:
+def test_full_primary_and_subagent_lifecycle_lean_v2(e2e_env):
+    """Verify the Lean v2.0.0 PreToolUse pipeline across Primary Agent and Subagent:
 
-    (a) spec-gate.py + enforce-delegation.py + inject-rules.py on flat invoke_subagent.
-    (b) record-tool-result.py on PostToolUse(invoke_subagent) -> EXECUTION_ACTIVE & ACTIVE work_item.
-    (c) Subagent step_index=0 token claim + edit_file + run_command -> WORK_CLAIMED & RUNNING.
-    (d) attention-check.py on subagent Stop with terminationReason='NO_TOOL_CALL' -> COMPLETED & WORK_TERMINATED_OK.
-    (e) attention-check.py on Primary Agent Stop BEFORE walkthrough.md -> Walkthrough Gate decision='continue'.
-    (f) Create fresh walkthrough.md -> attention-check.py returns decision='allow' -> CLOSED.
+    (a) enforce-delegation.py + inject-rules.py on flat invoke_subagent (preserving Model).
+    (b) Subagent step_index=0 token claim + edit_file + run_command + send_message.
+    (c) Token claimed_by and WORK_CLAIMED event recorded in Ledger.
     """
     app_data_dir = e2e_env["app_data_dir"]
     ws_dir = e2e_env["ws_dir"]
@@ -127,12 +121,10 @@ def test_full_primary_and_subagent_lifecycle_with_no_tool_call(e2e_env):
         encoding="utf-8",
     )
 
-    # ------------------------------------------------------------------------
-    # (a) PreToolUse on flat invoke_subagent
-    # ------------------------------------------------------------------------
     invoke_args = {
         "TypeName": "self",
         "Role": "Executor",
+        "Model": "inherit",
         "Prompt": "Implement feature code in src/app.py",
     }
     primary_payload = {
@@ -147,57 +139,21 @@ def test_full_primary_and_subagent_lifecycle_with_no_tool_call(e2e_env):
         "stepIdx": 0,
     }
 
-    # 1. enforce-delegation.py
     enf_res = run_hook(enforce_mod, primary_payload)
     assert enf_res.get("decision") == "allow", f"enforce-delegation rejected: {enf_res}"
 
-    # 2. inject-rules.py
     inj_res = run_hook(inject_mod, primary_payload)
     assert inj_res.get("decision") == "allow", f"inject-rules rejected: {inj_res}"
     assert "overwrite" in inj_res, "inject-rules must provide overwrite dictionary"
     overwrite = inj_res["overwrite"]
-    assert overwrite.get("Model") == "flash", "Primary thinking model must coerce child subagent to flash"
+    assert overwrite.get("Model") == "inherit", "Lean v2 preserves explicit Model='inherit'"
 
     injected_prompt = overwrite.get("Prompt", "")
-    assert "[ANTIGRAVITY_TOKEN:" in injected_prompt, "Token marker must be injected into prompt"
+    assert "[ANTIGRAVITY_TOKEN:" in injected_prompt
     token_match = re.search(r"\[ANTIGRAVITY_TOKEN:([a-f0-9\-]+)\]", injected_prompt)
-    assert token_match is not None, "Failed to extract UUID token from injected prompt"
+    assert token_match is not None
     token = token_match.group(1)
 
-    # ------------------------------------------------------------------------
-    # (b) record-tool-result.py on PostToolUse(invoke_subagent)
-    # ------------------------------------------------------------------------
-    post_payload = {
-        "conversationId": primary_conv_id,
-        "transcriptPath": str(primary_transcript),
-        "stepIdx": 0,
-        "toolCall": {"name": "invoke_subagent", "args": overwrite},
-        "toolResult": {"status": "dispatched", "conversationId": f"sub-{token[:8]}"},
-    }
-    rec_res = run_hook(record_mod, post_payload)
-    assert rec_res == {} or rec_res.get("decision") in (None, "allow")
-
-    # Verify FSM is EXECUTION_ACTIVE
-    fsm = FSM()
-    with ledger._get_connection() as conn:
-        rows = conn.execute(
-            "SELECT type, payload FROM events WHERE event_id LIKE ? ORDER BY created_at ASC",
-            (f"{primary_conv_id}_0_%",),
-        ).fetchall()
-        for r in rows:
-            try:
-                fsm.transition(Event[r[0]], json.loads(r[1]) if r[1] else {})
-            except KeyError as exc:
-                _ = exc
-        assert fsm.state == State.EXECUTION_ACTIVE, f"Expected EXECUTION_ACTIVE, got {fsm.state}"
-
-        # Verify work_item is ACTIVE
-        item = conn.execute("SELECT status FROM work_items WHERE work_id = ?", (token,)).fetchone()
-        assert item is not None and item[0] == "ACTIVE", f"Expected ACTIVE work_item, got {item}"
-
-    # ------------------------------------------------------------------------
-    # (c) Subagent Execution with token claim, edit_file, and run_command
-    # ------------------------------------------------------------------------
     subagent_conv_id = f"subagent-{token[:8]}"
     subagent_transcript = app_data_dir / "brain" / subagent_conv_id / "transcript.jsonl"
     subagent_transcript.parent.mkdir(parents=True, exist_ok=True)
@@ -211,7 +167,6 @@ def test_full_primary_and_subagent_lifecycle_with_no_tool_call(e2e_env):
         encoding="utf-8",
     )
 
-    # Subagent executes edit_file (Antigravity 2.0 schema)
     sub_edit_payload = {
         "tool_name": "edit_file",
         "toolCall": {
@@ -221,24 +176,31 @@ def test_full_primary_and_subagent_lifecycle_with_no_tool_call(e2e_env):
         "conversationId": subagent_conv_id,
         "transcriptPath": str(subagent_transcript),
     }
-    sub_edit_res = run_hook(enforce_mod, sub_edit_payload)
-    assert sub_edit_res.get("decision") == "allow", f"Subagent edit_file was rejected: {sub_edit_res}"
+    assert run_hook(enforce_mod, sub_edit_payload).get("decision") == "allow"
 
-    # Subagent executes run_command
     sub_cmd_payload = {
         "tool_name": "run_command",
         "toolCall": {"name": "run_command", "args": {"CommandLine": "rtk pytest tests/ -v"}},
         "conversationId": subagent_conv_id,
         "transcriptPath": str(subagent_transcript),
     }
-    sub_cmd_res = run_hook(enforce_mod, sub_cmd_payload)
-    assert sub_cmd_res.get("decision") == "allow", f"Subagent run_command was rejected: {sub_cmd_res}"
+    assert run_hook(enforce_mod, sub_cmd_payload).get("decision") == "allow"
 
-    # Verify token claimed and RUNNING in ledger
+    sub_msg_payload = {
+        "tool_name": "send_message",
+        "toolCall": {
+            "name": "send_message",
+            "args": {"Recipient": primary_conv_id, "Message": "Implemented feature; 5/5 tests passed."},
+        },
+        "conversationId": subagent_conv_id,
+        "transcriptPath": str(subagent_transcript),
+    }
+    assert run_hook(enforce_mod, sub_msg_payload).get("decision") == "allow"
+
     with ledger._get_connection() as conn:
         tok_row = conn.execute("SELECT claimed, claimed_by FROM tokens WHERE token_id = ?", (token,)).fetchone()
-        assert tok_row is not None and tok_row[0] == 1, "Token must be marked claimed"
-        assert tok_row[1] == subagent_conv_id, f"Token claimed_by must match {subagent_conv_id}"
+        assert tok_row is not None and tok_row[0] == 1
+        assert tok_row[1] == subagent_conv_id
 
         sub_events = [
             r[0]
@@ -247,70 +209,7 @@ def test_full_primary_and_subagent_lifecycle_with_no_tool_call(e2e_env):
                 (f"{subagent_conv_id}_%",),
             ).fetchall()
         ]
-        assert "WORK_CLAIMED" in sub_events, "WORK_CLAIMED event must be recorded"
-        assert "RUNNING" in sub_events, "RUNNING event must be recorded"
-
-    # ------------------------------------------------------------------------
-    # (d) Run attention-check.py on subagent Stop with NO_TOOL_CALL
-    # ------------------------------------------------------------------------
-    sub_stop_payload = {
-        "conversationId": subagent_conv_id,
-        "transcriptPath": str(subagent_transcript),
-        "terminationReason": "NO_TOOL_CALL",
-        "fullyIdle": True,
-        "error": "",
-    }
-    sub_stop_res = run_hook(attention_check_mod, sub_stop_payload)
-    assert sub_stop_res.get("decision") == "allow"
-
-    # Verify work_item status transitioned to COMPLETED
-    with ledger._get_connection() as conn:
-        item_row = conn.execute("SELECT status FROM work_items WHERE work_id = ?", (token,)).fetchone()
-        assert item_row is not None and item_row[0] == "COMPLETED", f"Expected COMPLETED, got {item_row}"
-
-        term_events = conn.execute("SELECT type FROM events WHERE type = 'WORK_TERMINATED_OK'").fetchall()
-        assert len(term_events) >= 1, "WORK_TERMINATED_OK event must be recorded in Ledger"
-
-    # ------------------------------------------------------------------------
-    # (e) Run attention-check.py on Primary Agent Stop BEFORE walkthrough.md
-    # ------------------------------------------------------------------------
-    primary_stop_payload = {
-        "conversationId": primary_conv_id,
-        "transcriptPath": str(primary_transcript),
-        "terminationReason": "NO_TOOL_CALL",
-        "fullyIdle": True,
-        "modelName": "claude-opus-4.6",
-    }
-    pri_stop_res = run_hook(attention_check_mod, primary_stop_payload)
-    assert pri_stop_res.get("decision") == "continue", (
-        f"Walkthrough Gate must fire and return decision='continue' when walkthrough.md is missing. Got: {pri_stop_res}"
-    )
-    assert "Walkthrough Gate" in pri_stop_res.get("reason", "")
-
-    # ------------------------------------------------------------------------
-    # (f) Create fresh walkthrough.md and re-run Primary Agent Stop
-    # ------------------------------------------------------------------------
-    brain_dir = app_data_dir / "brain" / primary_conv_id
-    brain_dir.mkdir(parents=True, exist_ok=True)
-    wt_file = brain_dir / "walkthrough.md"
-    wt_file.write_text("# Walkthrough\nFeature implementation verified.\n", encoding="utf-8")
-
-    pri_stop_res2 = run_hook(attention_check_mod, primary_stop_payload)
-    assert pri_stop_res2.get("decision") == "allow", f"Primary stop with fresh walkthrough rejected: {pri_stop_res2}"
-
-    # Verify FSM transitions to CLOSED
-    fsm_final = FSM()
-    with ledger._get_connection() as conn:
-        rows = conn.execute(
-            "SELECT type, payload FROM events WHERE event_id LIKE ? ORDER BY created_at ASC",
-            (f"{primary_conv_id}_0_%",),
-        ).fetchall()
-        for r in rows:
-            try:
-                fsm_final.transition(Event[r[0]], json.loads(r[1]) if r[1] else {})
-            except KeyError as exc:
-                _ = exc
-        assert fsm_final.state == State.CLOSED, f"Expected CLOSED state, got {fsm_final.state}"
+        assert "WORK_CLAIMED" in sub_events
 
 
 # ============================================================================
@@ -385,12 +284,7 @@ def test_subagent_doom_loop_and_test_tampering_e2e(tmp_path, monkeypatch):
             "parent_turn_id": "0",
         }),
     )
-    with ledger._get_connection() as conn:
-        conn.execute("INSERT INTO tokens (token_id, claimed, claimed_by) VALUES (?, 0, NULL)", (token,))
-        conn.execute(
-            "INSERT INTO work_items (work_id, status, created_at, updated_at, parent_conv_id, parent_turn_id) VALUES (?, 'ACTIVE', 1.0, 1.0, 'parent', '0')",
-            (token,),
-        )
+    ledger.issue_token(token, may_delegate=False, remaining_depth=0, parent_conv_id="parent")
 
     tpath = app_data_dir / "brain" / subagent_conv_id / "transcript.jsonl"
     tpath.parent.mkdir(parents=True, exist_ok=True)
@@ -532,52 +426,38 @@ def test_ecosystem_audit_cli_and_ledger_repair(tmp_path, monkeypatch):
     assert any("declares legacy 'write_to_file' but lacks Antigravity 2.0 'write_file'" in e for e in a_errs2)
     (agents_dir / "legacy-agent.md").unlink()  # remove to restore valid state
 
-    # 3. Test SQLite Ledger audit and repair
+    # 3. Test SQLite Ledger audit and repair (tokens + events)
     db_file = tmp_path / "audit_test.db"
     ledger = Ledger(db_path=str(db_file))
     now = time.time()
 
     with ledger._get_connection() as conn:
-        # Fresh active item
         conn.execute(
-            "INSERT INTO work_items (work_id, status, created_at, updated_at) VALUES ('active-fresh', 'ACTIVE', ?, ?)",
-            (now, now),
+            "INSERT INTO tokens (token_id, claimed, claimed_by, may_delegate, remaining_depth, parent_conv_id, created_at) "
+            "VALUES ('tok-fresh', 1, 'sub-1', 0, 0, 'parent', ?)",
+            (now,),
         )
-        # Stale active item (> 3600s old)
         conn.execute(
-            "INSERT INTO work_items (work_id, status, created_at, updated_at) VALUES ('active-stale', 'ACTIVE', ?, ?)",
-            (now - 4000, now - 4000),
-        )
-        # Recent timed_out item
-        conn.execute(
-            "INSERT INTO work_items (work_id, status, created_at, updated_at) VALUES ('to-recent', 'TIMED_OUT', ?, ?)",
-            (now - 1000, now - 1000),
-        )
-        # Old timed_out item (> 86400s old)
-        conn.execute(
-            "INSERT INTO work_items (work_id, status, created_at, updated_at) VALUES ('to-old', 'TIMED_OUT', ?, ?)",
-            (now - 90000, now - 90000),
+            "INSERT INTO tokens (token_id, claimed, claimed_by, may_delegate, remaining_depth, parent_conv_id, created_at) "
+            "VALUES ('tok-stale', 0, NULL, 0, 0, 'parent', ?)",
+            (now - 9 * 86400,),
         )
         conn.execute("INSERT INTO events (event_id, type, payload, created_at) VALUES ('ev-1', 'TEST', '{}', ?)", (now,))
+        conn.execute("INSERT INTO events (event_id, type, payload, created_at) VALUES ('ev-old', 'TEST', '{}', ?)", (now - 9 * 86400,))
 
     # Audit without repair
     l_ok, l_errs, l_stats = system_audit_mod.audit_sqlite_ledger(db_file, repair=False)
     assert l_ok is True
-    assert l_stats["work_items"]["active"] == 2
-    assert l_stats["work_items"]["timed_out"] == 2
+    assert l_stats["tokens"]["total"] == 2
+    assert l_stats["tokens"]["claimed"] == 1
+    assert l_stats["events"]["total"] == 2
 
     # Audit with repair=True
     l_ok_rep, l_errs_rep, l_stats_rep = system_audit_mod.audit_sqlite_ledger(db_file, repair=True)
     assert l_ok_rep is True
     rep_info = l_stats_rep.get("repair", {})
-    assert rep_info.get("active_marked_terminated") == 1, "Must mark 1 stale active as terminated"
-    assert rep_info.get("stale_timed_out_deleted") == 1, "Must delete 1 old timed_out row"
-
-    with ledger._get_connection() as conn:
-        stale_item = conn.execute("SELECT status FROM work_items WHERE work_id = 'active-stale'").fetchone()
-        assert stale_item[0] == "TERMINATED", "Stale item must be transitioned to TERMINATED"
-        old_to_item = conn.execute("SELECT 1 FROM work_items WHERE work_id = 'to-old'").fetchone()
-        assert old_to_item is None, "Old TIMED_OUT row must be deleted"
+    assert rep_info.get("tokens_deleted") == 1
+    assert rep_info.get("events_deleted") == 1
 
     # 4. Test audit_ecosystem function and main CLI
     eco_report = system_audit_mod.audit_ecosystem(

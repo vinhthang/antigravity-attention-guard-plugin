@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
 Verified Plugin Deployment Script for Attention Guard.
-Verifies bundle integrity (plugin.json, hooks.json, rules, schemas, scripts)
+Verifies bundle integrity (plugin.json, hooks.json, rules, scripts, skills)
 and safely synchronizes to ~/.gemini/config/plugins/attention-guard.
 """
-import sys
-import os
-import json
-import shutil
 import argparse
-from typing import Tuple, List
+import json
+import os
+import shutil
+import sys
+from typing import List, Tuple
 
 try:
     from surface_validator import validate_plugin_surface
@@ -21,8 +21,22 @@ except ImportError:
 
 CANONICAL_SOURCE = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
 INSTALLED_TARGET = os.path.realpath(os.path.expanduser("~/.gemini/config/plugins/attention-guard"))
-BUNDLE_ITEMS = ["plugin.json", "hooks.json", "rules", "schemas", "scripts", "skills"]
+BUNDLE_ITEMS = ["plugin.json", "hooks.json", "rules", "scripts", "skills"]
 OPTIONAL_BUNDLE_ITEMS = ["templates", "assets", "LICENSE"]
+
+
+def _prune_stale_entries(src_subdir: str, dst_subdir: str) -> None:
+    if not (os.path.isdir(dst_subdir) and os.path.isdir(src_subdir)):
+        return
+    src_entries = set(os.listdir(src_subdir))
+    for existing in os.listdir(dst_subdir):
+        if existing not in src_entries:
+            stale_p = os.path.join(dst_subdir, existing)
+            if os.path.isfile(stale_p) or os.path.islink(stale_p):
+                os.remove(stale_p)
+            elif os.path.isdir(stale_p):
+                shutil.rmtree(stale_p)
+
 
 def verify_source_bundle(source_dir: str) -> Tuple[bool, List[str]]:
     missing = []
@@ -31,7 +45,7 @@ def verify_source_bundle(source_dir: str) -> Tuple[bool, List[str]]:
         if not os.path.exists(item_path):
             missing.append(item)
             continue
-        
+
         if item.endswith(".json"):
             try:
                 with open(item_path, "r", encoding="utf-8") as f:
@@ -59,6 +73,7 @@ def verify_source_bundle(source_dir: str) -> Tuple[bool, List[str]]:
 
     return len(missing) == 0, missing
 
+
 def deploy(source_dir: str = CANONICAL_SOURCE, target_dir: str = INSTALLED_TARGET) -> bool:
     print(f"Verifying source bundle at {source_dir}...")
     valid, missing = verify_source_bundle(source_dir)
@@ -73,17 +88,15 @@ def deploy(source_dir: str = CANONICAL_SOURCE, target_dir: str = INSTALLED_TARGE
     os.makedirs(target_dir, exist_ok=True)
 
     print("Syncing bundle files to target plugin...")
-    target_rules = os.path.join(target_dir, "rules")
-    source_rules = os.path.join(source_dir, "rules")
-    if os.path.isdir(target_rules) and os.path.isdir(source_rules):
-        src_rule_files = set(os.listdir(source_rules))
-        for existing in os.listdir(target_rules):
-            if existing not in src_rule_files:
-                stale_p = os.path.join(target_rules, existing)
-                if os.path.isfile(stale_p):
-                    os.remove(stale_p)
-                elif os.path.isdir(stale_p):
-                    shutil.rmtree(stale_p)
+    target_schemas = os.path.join(target_dir, "schemas")
+    if os.path.exists(target_schemas) and not os.path.exists(os.path.join(source_dir, "schemas")):
+        if os.path.isdir(target_schemas):
+            shutil.rmtree(target_schemas)
+        else:
+            os.remove(target_schemas)
+
+    for sub in ("rules", "scripts", "templates"):
+        _prune_stale_entries(os.path.join(source_dir, sub), os.path.join(target_dir, sub))
 
     for item in BUNDLE_ITEMS + OPTIONAL_BUNDLE_ITEMS:
         src_item = os.path.join(source_dir, item)
@@ -96,6 +109,7 @@ def deploy(source_dir: str = CANONICAL_SOURCE, target_dir: str = INSTALLED_TARGE
             shutil.copy2(src_item, dst_item)
     print("Deployment completed successfully.")
     return True
+
 
 def main():
     parser = argparse.ArgumentParser(description="Attention Guard deployment and verification tool.")
@@ -117,6 +131,7 @@ def main():
     if args.deploy or not sys.argv[1:]:
         success = deploy(args.source, args.target)
         sys.exit(0 if success else 1)
+
 
 if __name__ == "__main__":
     main()

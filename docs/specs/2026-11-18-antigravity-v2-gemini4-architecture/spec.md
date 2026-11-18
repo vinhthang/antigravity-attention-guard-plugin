@@ -2,7 +2,7 @@
 
 - Feature ID: 2026-11-18-antigravity-v2-gemini4-architecture
 - Type: enhancement
-- Status: In-Testing
+- Status: Superseded
 - First entered In-Testing: 2026-11-18
 - Related specifications: Proposed: Changes [2026-10-31-subagent-task-fence-and-watchdog-enforcement](../2026-10-31-subagent-task-fence-and-watchdog-enforcement/spec.md), [2026-11-05-standalone-marketplace-packaging](../2026-11-05-standalone-marketplace-packaging/spec.md)
 
@@ -69,3 +69,4 @@ Baseline (`v1.0.0`) symbols inspected prior to `v1.1.0` changes:
 
 - 2026-11-18 (`Planning -> In-Progress`): User approved `implementation_plan.md` covering `REQ-038`..`REQ-041`; Gate 1 and Gate 2 passed.
 - 2026-11-18 (`In-Progress -> In-Testing`): Tasks 1 and 2 completed (`261/261` unit tests, `95%`–`100%` mutation kill rates, `v1.1.0` deployed live); recorded [Run 1](./verification.md#run-1--2026-11-18).
+- 2026-11-18 (`In-Testing -> Superseded`): Whole-package replacement [2026-11-18-lean-attention-guard-v2](../2026-11-18-lean-attention-guard-v2/spec.md) reached `In-Testing`.

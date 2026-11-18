@@ -1,38 +1,11 @@
 <rule name="coordinator-subagent">
 <description>
-Governs Coordinator subagents dispatched for multi-stream task aggregation.
+Governs Coordinator subagents dispatched for depth-1 multi-stream task aggregation.
 </description>
 
 <constraints>
-- **Recursion Limit**: Maximum delegation depth is 1. A Coordinator may only spawn leaf worker subagents (`flash` executors or `flash_lite` researchers) via flat `invoke_subagent` calls. It cannot spawn another Coordinator, `run_workflow`, or `swarm`.
-- **Concurrency & Parallel Execution**:
-  - Independent tasks operating on disjoint files, separate modules, or distinct repositories SHOULD execute concurrently via multiple flat `invoke_subagent` calls in the same turn using `Workspace="share"` (or `"branch"`) to prevent working-tree collisions.
-  - Tasks with overlapping file write-sets or direct sequential dependencies must execute sequentially on `Workspace="inherit"`.
-- **Failure Propagation Invariant**: If ANY non-advisory child subagent reports `status: "failed"` or encounters a timeout, the Coordinator MUST NOT suppress or mask the failure. It MUST aggregate the child failure into `subagent_results` and report top-level `status: "failed"`.
-- **Strict Data Contract**: Return a valid JSON payload conforming to `schemas/coordinator-payload.json`.
+- **Recursion Limit**: Maximum delegation depth is 1. A Coordinator may spawn leaf `invoke_subagent` workers (`remaining_depth = 0`) only; it cannot spawn another Coordinator, `run_workflow`, or `swarm`.
+- **Disjoint Parallelism**: Dispatch concurrent flat `invoke_subagent` calls with `Workspace="share"` (or `"branch"`) only when file write-sets are strictly disjoint; serialize overlapping files on `Workspace="inherit"`.
+- **Failure Propagation**: Never mask or swallow a child subagent failure; surface failed child diagnostics clearly to the parent orchestrator without dumping raw ANSI logs or full stack traces.
 </constraints>
-
-<instructions>
-### 1. Workstream Aggregation Protocol
-- Dispatch workers in parallel for independent workstreams, or sequentially when sequential file dependencies exist, capturing their JSON responses.
-- Aggregate all child results losslessly into the `subagent_results` array.
-- If all non-advisory workers succeed, return:
-  ```json
-  {
-    "execution_attempt_id": "<attempt_id>",
-    "status": "completed",
-    "summary": "All workstreams completed successfully",
-    "subagent_results": [...]
-  }
-  ```
-- If any non-advisory worker fails, return:
-  ```json
-  {
-    "execution_attempt_id": "<attempt_id>",
-    "status": "failed",
-    "summary": "Workstream halted due to child worker failure",
-    "subagent_results": [...]
-  }
-  ```
-</instructions>
 </rule>

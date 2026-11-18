@@ -149,8 +149,8 @@ def test_coordinator_creates_leaf_worker(tmp_path):
     assert child_data["may_delegate"] is False
     assert child_data["remaining_depth"] == 0
 
-class TestThinkingModelSubagentCoercion:
-    def test_opus_parent_coerces_inherit_model_to_flash(self):
+class TestModelPreservationAndInjection:
+    def test_opus_parent_preserves_inherit_model(self):
         result = run_hook({
             "conversationId": "parent-opus",
             "modelName": "claude-opus-4.6",
@@ -163,9 +163,9 @@ class TestThinkingModelSubagentCoercion:
         })
         assert result["decision"] == "allow"
         subagents = result["overwrite"]["Subagents"]
-        assert subagents[0]["Model"] == "flash"
+        assert subagents[0]["Model"] == "inherit"
 
-    def test_gemini4_parent_coerces_unset_model_to_flash(self):
+    def test_gemini4_parent_preserves_unset_model(self):
         result = run_hook({
             "conversationId": "parent-gemini-4",
             "model": "gemini-4-pro",
@@ -178,9 +178,9 @@ class TestThinkingModelSubagentCoercion:
         })
         assert result["decision"] == "allow"
         subagents = result["overwrite"]["Subagents"]
-        assert subagents[0]["Model"] == "flash"
+        assert "Model" not in subagents[0]
 
-    def test_gemini4_parent_coerces_empty_model_to_flash(self):
+    def test_gemini4_parent_preserves_empty_model(self):
         result = run_hook({
             "conversationId": "parent-gemini-4",
             "model_name": "Gemini 4 Ultra",
@@ -193,7 +193,7 @@ class TestThinkingModelSubagentCoercion:
         })
         assert result["decision"] == "allow"
         subagents = result["overwrite"]["Subagents"]
-        assert subagents[0]["Model"] == "flash"
+        assert subagents[0]["Model"] == ""
 
     def test_thinking_parent_preserves_explicit_pro_model(self):
         result = run_hook({
@@ -210,7 +210,7 @@ class TestThinkingModelSubagentCoercion:
         subagents = result["overwrite"]["Subagents"]
         assert subagents[0]["Model"] == "pro"
 
-    def test_non_thinking_parent_does_not_coerce_inherit(self):
+    def test_non_thinking_parent_preserves_inherit(self):
         result = run_hook({
             "conversationId": "parent-flash",
             "modelName": "gemini-3.8-flash",
@@ -225,7 +225,7 @@ class TestThinkingModelSubagentCoercion:
         subagents = result["overwrite"]["Subagents"]
         assert subagents[0]["Model"] == "inherit"
 
-    def test_env_var_thinking_model_coerces_model(self, monkeypatch):
+    def test_env_var_thinking_model_preserves_unset_model(self, monkeypatch):
         monkeypatch.setenv("AGY_PRIMARY_MODEL", "custom-reasoning-model")
         monkeypatch.setenv("ATTENTION_GUARD_THINKING_MODELS", "custom-reasoning-model,other-model")
         result = run_hook({
@@ -239,7 +239,7 @@ class TestThinkingModelSubagentCoercion:
         })
         assert result["decision"] == "allow"
         subagents = result["overwrite"]["Subagents"]
-        assert subagents[0]["Model"] == "flash"
+        assert "Model" not in subagents[0]
 
     def test_req007_flat_invoke_subagent_injection(self):
         result = run_hook({
