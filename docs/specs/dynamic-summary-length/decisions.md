@@ -13,7 +13,7 @@
 In earlier iterations of Attention Guard, concerns over Attention Dilution led to capping the subagent return summary:
 1. `rules/EXECUTOR.md` initially prescribed a maximum of 200 words.
 2. In subsequent schema hardening, this was codified as a hard JSON schema rule: `"maxLength": 1200`, and subsequently `"maxLength": 5000`.
-3. In runtime validation ([`scripts/payload_validator.py`](file:///Users/thanghoang/github/antigravity-attention-guard-plugin/scripts/payload_validator.py#L45)), any string exceeding the limit immediately caused `PAYLOAD_SCHEMA_VIOLATION`.
+3. In runtime validation (`scripts/payload_validator.py`), any string exceeding the limit immediately caused `PAYLOAD_SCHEMA_VIOLATION`.
 
 This rigid boundary created operational fragility:
 - Legitimate multi-file changes or deep diagnostic reports were rejected on single-character overflows.

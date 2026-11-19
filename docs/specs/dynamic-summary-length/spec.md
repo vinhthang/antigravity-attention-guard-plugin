@@ -1,7 +1,7 @@
 # Feature Specification: Dynamic Subagent Summary Length
 
 - **Feature ID**: `dynamic-summary-length`
-- **Status**: `review`
+- **Status**: `Superseded`
 - **Created**: 2026-10-11
 - **Domain**: Agent Governance & Payload Schema Validation
 

@@ -1,7 +1,7 @@
 # Specification: Harness² Surface Validation, Pointer-Based Context Boundary & Causal Edit Attribution
 
 - **Feature ID**: `2026-10-20-harness2-surface-context-attribution`
-- **Status**: `Planning`
+- **Status**: `completed`
 - **Version**: `1.0.0`
 - **Date**: `2026-10-20`
 - **Authors**: `Thang Hoang, Antigravity`
@@ -18,7 +18,7 @@ Analysis of Google Research's [`google-research/harness2`](https://github.com/go
    - Currently, [`scripts/inject-rules.py`](../../../scripts/inject-rules.py) (lines 68–70) concatenates full rule files directly into `sa["Prompt"]` and does not offload oversized subagent task prompts (>12,000 chars) to disk pointers (`context/task.md`). Furthermore, subagents lack `harness2/core/prompts.py`'s explicit `EVIDENCE_BOUNDARY` directive and `harness2/core/context.py`'s grader-verdict leak tripwire (`assert_no_grader_verdicts`).
 
 3. **Unattributed Multi-Edit Diagnosis & Confounded Memory Persistence (Step 2b)**:
-   - Currently, [`schemas/diagnostician-payload.json`](../../../schemas/diagnostician-payload.json) and [`scripts/payload_validator.py`](../../../scripts/payload_validator.py) do not classify prior failed attempt edits by component verdict (`helped`, `hurt`, `no_observed_effect`, `confounded`) and do not block `confounded` multi-component edits from producing a `transferable_lesson`. Additionally, [`scripts/ledger.py`](../../../scripts/ledger.py) and [`scripts/diagnostics.py`](../../../scripts/diagnostics.py) lack `harness2/core/ledger.py`'s duplicate-label / budget-identity audit.
+   - Currently, `schemas/diagnostician-payload.json` and `scripts/payload_validator.py` do not classify prior failed attempt edits by component verdict (`helped`, `hurt`, `no_observed_effect`, `confounded`) and do not block `confounded` multi-component edits from producing a `transferable_lesson`. Additionally, [`scripts/ledger.py`](../../../scripts/ledger.py) and [`scripts/diagnostics.py`](../../../scripts/diagnostics.py) lack `harness2/core/ledger.py`'s duplicate-label / budget-identity audit.
 
 ---
 
