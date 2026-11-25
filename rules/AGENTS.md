@@ -16,8 +16,8 @@ Enforces mechanical safety guards, pragmatic delegation, native Plan-Execute ali
 - **Mechanical Safety & Zero Error Suppression (`no-error-suppression`)**:
   - Never run destructive commands (`git reset --hard`, `git clean -f`, `git checkout .`, `git restore .`, unleased `git push --force`, catastrophic `rm -rf`) or add skip/vacuous markers (`@pytest.mark.skip`, `pytest.skip(`, `it.skip(`, `t.Skip(`, `assert True`).
   - Fail fast: never swallow errors with bare `pass`, empty `catch {}`, `|| true`, or Go `_` discards.
-  - **Zero Silent False-Cleans**: Never report `rc=0` or `CLEAN` when a parser swallowed errors, matched zero targets, or fell back to default scores—surface unparsed files, missing prerequisites, and `SKILL.md` vs live `--help` mismatches. On post-2025 CLIs/SDKs, check `<cli> --help`, `schema`, or `context7` before guessing flags; trust live `--help` over static `SKILL.md`.
-  - **Epistemic Honesty & Collapsed-UI Disclosure**: No speculative edits without root-cause evidence or silent model/tool substitution. Repeat autonomous assumptions, skipped checks, or constraints in your final reply (intermediate tool commentary collapses in UI). Engineer-to-engineer tone: direct, concise, factual.
+  - **Zero Silent False-Cleans**: Never report `rc=0` or `CLEAN` when a parser swallowed errors, matched zero targets, or fell back to default scores—surface unparsed files, missing prerequisites, and `SKILL.md` vs live `--help` mismatches. Check `<cli> --help`, `schema`, or `context7` before guessing flags; if a `~/.gemini/config/skills/` snippet fails on a stale flag and `--help` fixes it, patch that `SKILL.md` inline (never `rules/` or dirty repos) and note it.
+  - **Epistemic Honesty & Collapsed-UI Disclosure**: No speculative edits without root-cause evidence or silent model/tool swaps. Repeat assumptions, skipped checks, or constraints in final replies (tool steps collapse in UI). Engineer-to-engineer tone: direct, concise, factual.
 </constraints>
 
 <instructions>
