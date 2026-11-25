@@ -8,7 +8,7 @@ Enforces mechanical safety guards, pragmatic delegation, native Plan-Execute ali
 <constraints>
 - **Pragmatic Execution & Delegation**:
   - Run quick fixes, 1–2 file edits, config updates, git ops, and `rtk`-filtered tests directly in the Primary Agent.
-  - Delegate via `invoke_subagent`, `run_workflow`, or native `swarm` for 3+ disjoint files, parallel workstreams, broad read-only exploration, or noisy multi-step builds.
+  - Delegate via `invoke_subagent` (1–2 slices) or `run_workflow` (3+ slices) for parallel workstreams, broad read-only exploration, or noisy multi-step builds (never start `swarm` unprompted—only on explicit `/swarm`).
   - **Turn-Cost Math & Subagent I/O**: Batch parallel reads with wide line bounds for `edit_file` (each turn resends full history). Keep `send_message` concise—no raw ANSI logs or full pytest traces.
 - **Native Plan-Execute Alignment (`/grill-me` & `/plan`)**:
   - Clarify material scope ambiguities via `ask_question` (`(Recommended)` first) before planning.
@@ -22,10 +22,10 @@ Enforces mechanical safety guards, pragmatic delegation, native Plan-Execute ali
 
 <instructions>
 ### 1. Gemini 4 Effort & Subagent Model Selection
-- Gemini 4 Carbon (`0.15` unset vs `1.00` High) and Argon (`0.20` vs `1.00`) gain 5x–6.6x reasoning at High effort. Default workers to `inherit` (omit `Model`); pass `Model="flash"` for `browser` and mechanical sweeps, `flash_lite` (`TypeName="research"`) for broad read-only search, or `pro` for deep escalation.
+- Gemini 4 Carbon/Argon/Neon/Hydrogen gain 5x–6.6x reasoning at `high`/`xhigh` effort (vs `0.15`/`0.20` unset). Default workers to `inherit` (omit `Model`); pass `Model="flash"` for `browser` and mechanical sweeps, `flash_lite` (`TypeName="research"`) for broad read-only search, or `pro` for deep escalation.
 - **1–2 Disjoint Tasks (`invoke_subagent`)**: Spawn concurrent `invoke_subagent` calls with `Workspace="share"` (or `"branch"`) for disjoint write-sets; serialize overlapping files on `Workspace="inherit"`.
 - **3+ Disjoint Slices (`run_workflow`)**: Use `run_workflow` (`phase`, `parallel`, `pipeline`, `agent(..., workspace="share")`).
-- **Peer Collaboration (`swarm` / `/teamwork`)**: Use native `swarm` (`workspace="share"` for parallel authors, `workspace="inherit"` for `@verifier`), merging branches before `swarm(action="kill")`.
+- **Explicit `/swarm` Sessions Only**: Never call `swarm` autonomously; on `/swarm`, load `swarm_pane` first, use `workspace="share"` for authors and `"inherit"` for `@verifier`, and merge before `kill`.
 - **Bounded Escalation**: Cap autonomous fix attempts at 3 escalations before halting with root-cause findings.
 
 ### 2. Skill Routing Triggers
