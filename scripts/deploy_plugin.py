@@ -22,7 +22,7 @@ except ImportError:
 CANONICAL_SOURCE = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
 INSTALLED_TARGET = os.path.realpath(os.path.expanduser("~/.gemini/config/plugins/attention-guard"))
 BUNDLE_ITEMS = ["plugin.json", "hooks.json", "rules", "scripts", "skills"]
-OPTIONAL_BUNDLE_ITEMS = ["templates", "assets", "LICENSE"]
+OPTIONAL_BUNDLE_ITEMS = ["templates", "assets", "LICENSE", "README.md"]
 
 
 def _prune_stale_entries(src_subdir: str, dst_subdir: str) -> None:
@@ -30,12 +30,14 @@ def _prune_stale_entries(src_subdir: str, dst_subdir: str) -> None:
         return
     src_entries = set(os.listdir(src_subdir))
     for existing in os.listdir(dst_subdir):
+        stale_p = os.path.join(dst_subdir, existing)
         if existing not in src_entries:
-            stale_p = os.path.join(dst_subdir, existing)
             if os.path.isfile(stale_p) or os.path.islink(stale_p):
                 os.remove(stale_p)
             elif os.path.isdir(stale_p):
                 shutil.rmtree(stale_p)
+        elif os.path.isdir(stale_p) and os.path.isdir(os.path.join(src_subdir, existing)):
+            _prune_stale_entries(os.path.join(src_subdir, existing), stale_p)
 
 
 def verify_source_bundle(source_dir: str) -> Tuple[bool, List[str]]:
@@ -95,7 +97,7 @@ def deploy(source_dir: str = CANONICAL_SOURCE, target_dir: str = INSTALLED_TARGE
         else:
             os.remove(target_schemas)
 
-    for sub in ("rules", "scripts", "templates"):
+    for sub in ("rules", "scripts", "skills", "templates"):
         _prune_stale_entries(os.path.join(source_dir, sub), os.path.join(target_dir, sub))
 
     for item in BUNDLE_ITEMS + OPTIONAL_BUNDLE_ITEMS:

@@ -24,8 +24,12 @@ class PluginSurfaceSpec:
     autotrigger_file: str = "rules/AGENTS.md"
     trigger_line: str = "- When {desc}, consult skill `{name}`.\n"
     hooks_file: str = "hooks.json"
-    hook_events: frozenset[str] = frozenset({"PreInvocation", "PreToolUse", "PostToolUse", "Stop"})
+    hook_events: frozenset[str] = frozenset(
+        {"SessionStart", "PreInvocation", "PostInvocation", "PreToolUse", "PostToolUse", "Stop"}
+    )
 
+
+VALID_RULE_TRIGGERS: frozenset[str] = frozenset({"always_on", "model_decision", "glob", "manual"})
 
 DEFAULT_SURFACE = PluginSurfaceSpec()
 
@@ -76,14 +80,36 @@ def read_plugin_tree(
     return tree
 
 
+def is_always_on_rule(rel_path: str, content: str) -> bool:
+    """
+    Returns True when a rule file loads unconditionally into context.
+    AGENTS.md and GEMINI.md are always active; other rules/*.md files check YAML `trigger:`.
+    """
+    if Path(rel_path).name in {"AGENTS.md", "GEMINI.md"}:
+        return True
+    fm = extract_frontmatter(content)
+    trig = fm.get("trigger", "").strip()
+    if trig in {"model_decision", "glob", "manual"}:
+        return False
+    return True
+
+
 def always_on_text(surface: PluginSurfaceSpec, tree: dict[str, str]) -> str:
     """
-    Joins tree.get(a, "") for a in surface.always_on.
-    If none of surface.always_on exist in tree, falls back to all_rules_text(tree).
+    Joins always-on rule files from surface.always_on.
+    If none of surface.always_on exist in tree, falls back to always-on rules in rules/*.md.
     """
-    found = [tree[a] for a in surface.always_on if a in tree]
-    if not found:
-        return all_rules_text(tree)
+    found = [
+        tree[a]
+        for a in surface.always_on
+        if a in tree and is_always_on_rule(a, tree[a])
+    ]
+    if not found and not any(a in tree for a in surface.always_on):
+        return "\n".join(
+            content
+            for path, content in sorted(tree.items())
+            if path.startswith("rules/") and path.endswith(".md") and is_always_on_rule(path, content)
+        )
     return "\n".join(found)
 
 
@@ -349,7 +375,30 @@ def validate_plugin_surface(
             except Exception as e:
                 errs.append(f"Failed to write repaired triggers to '{target_file}': {e}")
 
-    # 1. Always-on budget check
+    # 1. Always-on budget check & modular rule frontmatter validation
+    for rel_path, content in sorted(tree.items()):
+        if not (rel_path.startswith("rules/") and rel_path.endswith(".md")):
+            continue
+        if Path(rel_path).name in {"AGENTS.md", "GEMINI.md"}:
+            continue
+        if not content.lstrip().startswith("---"):
+            continue
+        fm = extract_frontmatter(content)
+        trig = fm.get("trigger", "").strip()
+        if trig not in VALID_RULE_TRIGGERS:
+            errs.append(
+                f"Invalid rule trigger '{trig}' in '{rel_path}' "
+                f"(expected one of {sorted(VALID_RULE_TRIGGERS)})"
+            )
+        elif trig == "model_decision" and not fm.get("description", "").strip():
+            errs.append(
+                f"Rule '{rel_path}' with trigger 'model_decision' missing non-empty 'description:' in frontmatter"
+            )
+        elif trig == "glob" and not (fm.get("globs", "").strip() or fm.get("glob", "").strip()):
+            errs.append(
+                f"Rule '{rel_path}' with trigger 'glob' missing non-empty 'globs:' in frontmatter"
+            )
+
     aon = always_on_text(surface, tree)
     aon_len = len(aon)
     if aon_len > cap:

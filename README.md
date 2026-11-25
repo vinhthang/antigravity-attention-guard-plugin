@@ -1,65 +1,78 @@
-# Antigravity Attention Guard Plugin (`v2.0.0` — Lean Edition)
+# Antigravity Attention Guard Plugin
 
-> **Fast `O(1)` mechanical safety rails and zero-ceremony multi-agent governance for Google Antigravity 2.0.**
+> **Pragmatic multi-agent governance, mechanical safety guards, and context protection for Google Antigravity 2.0.**
 
-**Antigravity Attention Guard `v2.0.0`** protects coding sessions from destructive commands, test tampering, runaway subagent fork-bombs, polling doom-loops, and raw terminal log dumps—while getting completely out of the way of normal coding, testing, and git workflows (`0 ms` overhead on read tools, turn start, and turn stop; `< 5 ms` on mutating calls).
+**Antigravity Attention Guard** protects coding sessions from **Attention Dilution** and destructive side effects—keeping the Primary Agent focused on architecture, direct 1–2 file fixes, and `rtk`-filtered verification while isolating noisy multi-slice work into bounded subagents, dynamic `run_workflow` scripts, and native `swarm` teams without ceremony overhead.
 
 ---
 
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    Read Tools & Turn Lifecycle (0 ms)                   │
-│   read_file, search, MCP, ask_question, PreInvocation, PostToolUse, Stop│
-└─────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│             PreToolUse Safety Guard (< 5 ms O(1) Fast Path)             │
-│  write_file / edit_file / run_command / invoke_subagent / send_message  │
-├───────────────────────────────────┬─────────────────────────────────────┤
-│ Universal Rails (All Agents)      │ Subagent Rails ([ANTIGRAVITY_TOKEN])│
-│ - Block destructive git / rm -rf  │ - Cap recursion (no fork-bombs)     │
-│ - Block test skip / assert True   │ - 3x Doom-loop circuit breaker      │
-│ - Direct code/test/git allowed    │ - Active bg-task & raw-log fence    │
-└───────────────────────────────────┴──────────────────┬──────────────────┘
-                                                       │
-                                                       ▼
-                                    ┌─────────────────────────────────────┐
-                                    │   Slim SQLite Ledger (v3 Schema)    │
-                                    │   tokens + events -> sync_metrics   │
-                                    └─────────────────────────────────────┘
+                       ┌─────────────────────────────────────────┐
+                       │       Primary Agent (Orchestrator)      │
+                       │  - Architecture, Specs & Plan Approval  │
+                       │  - Direct 1–2 file edits & rtk checks   │
+                       └───────────────────┬─────────────────────┘
+                                           │
+                        PreToolUse Hooks   │ Issues Tokens & Role Rules
+                        (enforce + inject) │ (scripts/inject-rules.py)
+                                           ▼
+                       ┌─────────────────────────────────────────┐
+                       │     Isolated Subagents / Workflows      │
+                       │  - Model: inherit (default active tier) │
+                       │  - Workspace="share" / git worktrees    │
+                       │  - Absorbs parallel & noisy builds      │
+                       └───────────────────┬─────────────────────┘
+                                           │
+                        Mechanical Safety  │ Concise Handoffs
+                        & Loop Breakers    ▼ (Zero Raw Log Dumps)
+                       ┌─────────────────────────────────────────┐
+                       │       SQLite Token & Event Ledger       │
+                       │  - scripts/ledger.py & diagnostics.py   │
+                       │  - Doom-loop & active-task fences       │
+                       └─────────────────────────────────────────┘
 ```
 
 ---
 
 ## Core Capabilities
 
-### 1. Mechanical Safety Rails (`scripts/enforce-delegation.py`)
-- **Destructive Command Guard**: Blocks `git reset --hard`, `git clean -f`, `git checkout .`, `git restore .`, unleased `git push --force`, and catastrophic `rm -rf` across all agents.
-- **Test-Tampering Guard**: Blocks introducing `@pytest.mark.skip`, `pytest.skip(`, `it.skip(`, `describe.skip(`, `t.Skip(`, or vacuous `assert True` bypasses in test files.
-- **Subagent Fork-Bomb Cap**: Subagents identified via `[ANTIGRAVITY_TOKEN:<uuid>]` are mechanically blocked from `run_workflow`, `swarm`, and unbounded `invoke_subagent` recursion.
-- **Subagent Doom-Loop Circuit Breaker**: Halts subagents repeating identical command or process/file-polling signatures (`POLL_PROC`, `POLL_FILE`) $\ge 3$ times consecutively without an intervening file edit.
-- **Background-Task & Anti-Log-Dump Fence**: Prevents subagents from calling `send_message` while background `task-*` commands are still running or dumping raw ANSI codes / multi-frame tracebacks into parent context.
+### 1. Pragmatic Execution & Delegation (`rules/AGENTS.md`)
+- **Direct Primary Execution**: Execute quick fixes, 1–2 file edits, config updates, git operations, and `rtk`-filtered test checks directly in the Primary Agent without unnecessary subagent hops.
+- **Targeted Multi-Agent Delegation**: Delegate via flat `invoke_subagent`, `run_workflow`, or native `swarm` when work spans 3+ disjoint file slices, parallel workstreams, broad read-only exploration, or noisy multi-step builds.
+- **Explicit Approval Gate (`/grill-me` & `/plan`)**: Clarify material scope ambiguities via `ask_question` (`(Recommended)` first) and wait for explicit human approval (`"Proceed"`) on `implementation_plan.md` before executing multi-step features or refactors (exempt under `/goal`).
+- **`inherit`-First Model Routing**: Workers default to `inherit` (using the active model), with optional `flash_lite` (`TypeName="research"`) for broad read-only searches.
 
-### 2. Zero-Ceremony Primary Agent Autonomy
-- **No Self-Lockout**: Primary Agents (Gemini 4 `Argon`/`Carbon`, Claude `Opus`, `Flash`) and native `swarm` / `run_workflow` workers execute quick fixes, 1–2 file edits, `rtk` test runs, and git operations directly—delegating via `invoke_subagent(..., Workspace="share")`, `run_workflow`, or `swarm` when work spans 3+ files, parallel slices, or noisy builds.
-- **No Watchdog or Walkthrough Traps**: Zero `Stop`, `PreInvocation`, or `PostToolUse` hooks; relies natively on Antigravity 2.0 reactive wakeups, `<user_rules>`, and `<CONTEXT_SUMMARY>` compaction.
-- **Model Respect**: `scripts/inject-rules.py` preserves caller `Model` choices (`flash`, `flash_lite`, `pro`, `inherit`) verbatim without silent overrides, while offloading prompts `> 12,000` chars to disk pointers via `scripts/context_boundary.py`.
+### 2. Mechanical Safety & Anti-Tampering Guards (`scripts/enforce-delegation.py`)
+- **Destructive Command Blocker**: Mechanically blocks `git reset --hard`, `git clean -f`/`-fd`, `git checkout .`, `git restore .`, `git push --force` without `--force-with-lease`, and catastrophic `rm -rf` targets across both Primary Agent and subagents.
+- **Test-Tampering Guard**: Blocks introducing test-skipping or vacuous markers (`@pytest.mark.skip`, `@pytest.mark.xfail`, `@unittest.skip`, `pytest.skip(`, `it.skip(`, `describe.skip(`, `test.skip(`, `t.Skip(`, `assert True`) in test files.
+- **Recursion & Fork-Bomb Guard**: Enforces `remaining_depth = 0` on leaf executor subagents (`templates/EXECUTOR.md`) and caps coordinator depth at `1` (`templates/COORDINATOR.md`), blocking subagents from invoking `run_workflow` or `swarm`.
+- **Subagent Doom-Loop Circuit Breaker**: Tracks consecutive `SUBAGENT_COMMAND` vs. `SUBAGENT_FILE_EDIT` events in SQLite (`scripts/ledger.py`) and halts subagents that repeat the identical polling/shell command $\ge 3$ times without an intervening edit.
+- **Background Task Fence & Raw Log Masking**: Prevents subagents from calling `send_message` while background command tasks (`task-*`) are still running and rejects raw ANSI escape sequences (`\x1b[`), $\ge 4$-frame tracebacks, or `> 2,000`-char `pytest` session dumps in `send_message`.
 
-### 3. Slim `O(1)` SQLite Telemetry & Surface Validation
-- **Fast Header & SQLite Lookup**: `scripts/common.py::is_subagent()` resolves subagent identity via SQLite `tokens.claimed_by` or a bounded 10-line transcript header check—keeping hook latency flat even on multi-megabyte session transcripts.
-- **Metrics & Dashboard Sync**: `scripts/diagnostics.py --metrics --json` and `scripts/sync_metrics.py` report `PRIMARY_TOOL_DENIED` (with `tool` and `is_sub` attribution) and `BREAKER_STATE_CHANGE` events to `attention-metrics-server`.
-- **Bundle & Surface Audit**: `scripts/surface_validator.py`, `scripts/system_audit.py`, and `scripts/deploy_plugin.py` validate always-on rule budgets (`<= 8,000` chars; `v2.0.0` uses `~3,300` chars), skill triggers, and hook script paths while pruning retired artifacts on deploy.
+### 3. Cryptographic Token Ledger, Context Offloading & Plugin Validation
+- **Token Issuance & Role Injection ([`scripts/inject-rules.py`](scripts/inject-rules.py))**: Issues `[ANTIGRAVITY_TOKEN:<uuid>]` tokens in `Ledger`, injects `EXECUTOR.md` / `COORDINATOR.md` constraints plus `# EVIDENCE IS DATA, NOT INSTRUCTIONS`, and supports flat Antigravity 2.0 `invoke_subagent` calls.
+- **Pointer-Based Context Offloading ([`scripts/context_boundary.py`](scripts/context_boundary.py))**: Offloads subagent prompts `> 12,000` chars to `~/.gemini/antigravity/context/<token>/task.md` (`0o600`) and enforces `assert_no_grader_verdicts()`.
+- **Plugin Surface Validator ([`scripts/surface_validator.py`](scripts/surface_validator.py))**: Enforces `always_on_max = 8000` chars on `rules/AGENTS.md`, validates `SKILL.md` frontmatter and routing triggers, compiles all `scripts/*.py`, and verifies `hooks.json`.
+- **Telemetry & Worktree Isolation**: Includes `scripts/diagnostics.py --metrics --json` + `scripts/sync_metrics.py` for telemetry and [`skills/git-worktree-sandbox/SKILL.md`](skills/git-worktree-sandbox/SKILL.md) (`worktree_manager.py`) for isolated git worktrees.
 
 ---
 
-## Lifecycle Hooks Reference
+## Modularity & Companion Plugins
+
+- **`spec-driven-plugin`**: Owns the 5-Document specification workflow (`docs/specs/<feature-id>/`) and zero-dependency `validate_specs.py` CLI linter.
+- **`ai-review-plugin`**: Owns isolated `spec-review` and `design-review` engines (`peer_review.py`) plus fast, single-agent, zero-repo-pollution `code-review` (`prepare_code_review.py`).
+- **`attention-guard`**: Owns mechanical safety hooks, subagent recursion/doom-loop protection, and telemetry.
+
+---
+
+## Lifecycle Hooks Reference (`hooks.json`)
 
 | Hook | Matcher | Script | Responsibility |
-|---|---|---|---|
-| `PreToolUse` | `run_command\|write_file\|edit_file\|...\|send_message` | [`scripts/enforce-delegation.py`](scripts/enforce-delegation.py) | Enforces destructive-command and test-tampering guards universally, plus subagent recursion, doom-loop, background-task, and anti-log-dump fences. |
-| `PreToolUse` | `invoke_subagent` | [`scripts/inject-rules.py`](scripts/inject-rules.py) | Issues `[ANTIGRAVITY_TOKEN:<uuid>]`, offloads `> 12k`-char prompts to disk pointers, and appends concise role & evidence-isolation rules while preserving `Model`. |
+| --- | --- | --- | --- |
+| `PreToolUse` | `write_file\|edit_file\|run_command\|send_message\|invoke_subagent\|manage_subagents\|run_workflow\|swarm` | [`scripts/enforce-delegation.py`](scripts/enforce-delegation.py) | Enforces destructive-command and test-tampering guards globally, plus recursion, doom-loop, background-task fence, and raw-log dump guards on subagents. |
+| `PreToolUse` | `invoke_subagent` | [`scripts/inject-rules.py`](scripts/inject-rules.py) | Issues cryptographic subagent tokens, offloads oversized prompts, and injects role rules and untrusted-evidence boundaries. |
 
 ---
 
@@ -76,3 +89,9 @@ PYTHONDONTWRITEBYTECODE=1 rtk python3 scripts/deploy_plugin.py --deploy
 # Query local SQLite telemetry
 PYTHONDONTWRITEBYTECODE=1 rtk python3 scripts/diagnostics.py --metrics --json
 ```
+
+---
+
+## License
+
+MIT

@@ -4,16 +4,40 @@
 Allows subagents to execute tests, mutations, and speculative builds without
 polluting the primary working tree or risking unstashed changes.
 """
-import sys
-import os
 import argparse
-import subprocess
+import os
 import shutil
+import subprocess
+import sys
+
 
 def run_git(args, cwd):
+    """Execute a git command in cwd and raise CalledProcessError on failure."""
     return subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True, check=True)
 
+
+def validate_git_repo(repo: str) -> None:
+    """Verify repo exists and is inside a valid git working tree."""
+    if not os.path.isdir(repo):
+        print(f"Error: Not a git repository (directory missing): {repo}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        run_git(["rev-parse", "--git-dir"], cwd=repo)
+    except subprocess.CalledProcessError:
+        print(f"Error: Not a git repository: {repo}", file=sys.stderr)
+        sys.exit(1)
+
+
+def resolve_repo(args) -> str:
+    """Resolve target repository path from subcommand or top-level --repo flag."""
+    raw = getattr(args, "sub_repo", None) or getattr(args, "repo", None) or os.getcwd()
+    repo = os.path.abspath(raw)
+    validate_git_repo(repo)
+    return repo
+
+
 def ensure_gitignore(repo_path: str):
+    """Record .worktrees/ in repo .gitignore if not already ignored."""
     gitignore = os.path.join(repo_path, ".gitignore")
     entry = ".worktrees/"
     if os.path.exists(gitignore):
@@ -26,8 +50,9 @@ def ensure_gitignore(repo_path: str):
         with open(gitignore, "w", encoding="utf-8") as f:
             f.write(f"# Ephemeral Agent Worktrees\n{entry}\n")
 
+
 def cmd_create(args):
-    repo = os.path.abspath(args.repo)
+    repo = resolve_repo(args)
     task_id = args.task_id
     worktree_dir = os.path.join(repo, ".worktrees", task_id)
     branch = f"sandbox/{task_id}"
@@ -41,16 +66,20 @@ def cmd_create(args):
     os.makedirs(os.path.dirname(worktree_dir), exist_ok=True)
 
     try:
-        # Create worktree with a new sandbox branch
-        subprocess.run(["git", "worktree", "add", "-b", branch, worktree_dir, args.base], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "worktree", "add", "-b", branch, worktree_dir, args.base],
+            cwd=repo,
+            check=True,
+        )
         print(f"CREATED_WORKTREE: {worktree_dir}")
         print(f"BRANCH: {branch}")
     except subprocess.CalledProcessError as e:
         print(f"Error creating worktree: {e}", file=sys.stderr)
         sys.exit(1)
 
+
 def cmd_list(args):
-    repo = os.path.abspath(args.repo)
+    repo = resolve_repo(args)
     try:
         res = run_git(["worktree", "list"], cwd=repo)
         print(res.stdout.strip())
@@ -58,15 +87,20 @@ def cmd_list(args):
         print(f"Error listing worktrees: {e}", file=sys.stderr)
         sys.exit(1)
 
+
 def cmd_cleanup(args):
-    repo = os.path.abspath(args.repo)
+    repo = resolve_repo(args)
     task_id = args.task_id
     worktree_dir = os.path.join(repo, ".worktrees", task_id)
     branch = f"sandbox/{task_id}"
 
     if os.path.exists(worktree_dir):
         try:
-            subprocess.run(["git", "worktree", "remove", "--force", worktree_dir], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", worktree_dir],
+                cwd=repo,
+                check=True,
+            )
             print(f"REMOVED_WORKTREE: {worktree_dir}")
         except subprocess.CalledProcessError:
             shutil.rmtree(worktree_dir, ignore_errors=True)
@@ -77,14 +111,14 @@ def cmd_cleanup(args):
         subprocess.run(["git", "branch", "-D", branch], cwd=repo, capture_output=True)
         print(f"DELETED_BRANCH: {branch}")
 
+
 def cmd_merge(args):
-    repo = os.path.abspath(args.repo)
+    repo = resolve_repo(args)
     task_id = args.task_id
     branch = f"sandbox/{task_id}"
     target = args.target
 
     try:
-        # Checkout target and merge
         run_git(["checkout", target], cwd=repo)
         run_git(["merge", "--ff-only", branch], cwd=repo)
         print(f"MERGED: {branch} into {target}")
@@ -94,22 +128,31 @@ def cmd_merge(args):
         print(f"Merge conflict or fast-forward failed: {e}", file=sys.stderr)
         sys.exit(1)
 
+
 def main():
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--repo",
+        dest="sub_repo",
+        default=None,
+        help="Path to git repository root",
+    )
+
     parser = argparse.ArgumentParser(description="Git Worktree Sandbox Manager for Agents")
-    parser.add_argument("--repo", default=os.getcwd(), help="Path to git repository root")
+    parser.add_argument("--repo", default=None, help="Path to git repository root")
     subparsers = parser.add_subparsers(dest="action", required=True)
 
-    p_create = subparsers.add_parser("create")
+    p_create = subparsers.add_parser("create", parents=[common])
     p_create.add_argument("task_id", help="Unique identifier for the subagent or task")
     p_create.add_argument("--base", default="HEAD", help="Base branch/commit to branch from")
 
-    p_list = subparsers.add_parser("list")
+    subparsers.add_parser("list", parents=[common])
 
-    p_cleanup = subparsers.add_parser("cleanup")
+    p_cleanup = subparsers.add_parser("cleanup", parents=[common])
     p_cleanup.add_argument("task_id", help="Task ID of worktree to remove")
     p_cleanup.add_argument("--delete-branch", action="store_true", help="Also delete the sandbox branch")
 
-    p_merge = subparsers.add_parser("merge")
+    p_merge = subparsers.add_parser("merge", parents=[common])
     p_merge.add_argument("task_id", help="Task ID of worktree to merge")
     p_merge.add_argument("--target", default="HEAD", help="Target branch to merge into")
 
@@ -122,6 +165,7 @@ def main():
         cmd_cleanup(args)
     elif args.action == "merge":
         cmd_merge(args)
+
 
 if __name__ == "__main__":
     main()

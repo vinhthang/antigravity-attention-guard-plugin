@@ -621,7 +621,10 @@ def test_ac_046_1_and_ac_046_2_lean_surface_and_deploy_pruning(tmp_path, monkeyp
 
     agents_text = (REPO_ROOT / "rules" / "AGENTS.md").read_text(encoding="utf-8")
     assert len(agents_text) <= 4000
-    assert "attention-metrics" in agents_text
+    assert "diagnostics.py" in agents_text
+    assert "--metrics --json" in agents_text
+    assert "Zero Silent False-Cleans" in agents_text
+    assert "attention-metrics" not in agents_text
     assert "git-worktree-sandbox" in agents_text
     for forbidden in ("payload_validator.py", "DurationSeconds=300", "/Users/thanghoang"):
         assert forbidden not in agents_text
@@ -635,12 +638,36 @@ def test_ac_046_1_and_ac_046_2_lean_surface_and_deploy_pruning(tmp_path, monkeyp
     (target_dir / "scripts" / "attention-check.py").write_text("# stale\n", encoding="utf-8")
     (target_dir / "scripts" / "fsm.py").write_text("# stale\n", encoding="utf-8")
     (target_dir / "schemas" / "executor-payload.json").write_text("{}\n", encoding="utf-8")
+    (target_dir / "skills" / "attention-metrics").mkdir(parents=True)
+    (target_dir / "skills" / "attention-metrics" / "SKILL.md").write_text("# stale\n", encoding="utf-8")
+    (target_dir / "skills" / "git-worktree-sandbox" / "tests").mkdir(parents=True)
+    (target_dir / "skills" / "git-worktree-sandbox" / "tests" / "stale.py").write_text("# stale\n", encoding="utf-8")
 
     deploy_mod = _load_script_module("deploy_plugin_v2", "deploy_plugin.py")
     assert deploy_mod.deploy(str(REPO_ROOT), str(target_dir)) is True
     assert not (target_dir / "scripts" / "attention-check.py").exists()
     assert not (target_dir / "scripts" / "fsm.py").exists()
     assert not (target_dir / "schemas").exists()
+    assert not (target_dir / "skills" / "attention-metrics").exists()
+    assert not (target_dir / "skills" / "git-worktree-sandbox" / "tests").exists()
+    assert (target_dir / "README.md").is_file()
+
+    # Verify verify_source_bundle checks plugin.json logo and CANONICAL_SOURCE extras
+    pjson = json.loads((target_dir / "plugin.json").read_text(encoding="utf-8"))
+    orig_logo = pjson["logo"]
+    pjson["logo"] = "assets/missing.svg"
+    (target_dir / "plugin.json").write_text(json.dumps(pjson), encoding="utf-8")
+    valid_logo, missing_logo = deploy_mod.verify_source_bundle(str(target_dir))
+    assert valid_logo is False
+    assert any("assets/missing.svg" in m for m in missing_logo)
+
+    pjson["logo"] = orig_logo
+    (target_dir / "plugin.json").write_text(json.dumps(pjson), encoding="utf-8")
+    monkeypatch.setattr(deploy_mod, "CANONICAL_SOURCE", str(target_dir.resolve()))
+    (target_dir / "LICENSE").unlink()
+    valid_extra, missing_extra = deploy_mod.verify_source_bundle(str(target_dir))
+    assert valid_extra is False
+    assert "LICENSE" in missing_extra
 
 
 def test_scan_transcript_header_boundaries_and_lean_parse_transcript(tmp_path, monkeypatch):

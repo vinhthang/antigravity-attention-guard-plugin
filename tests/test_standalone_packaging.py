@@ -135,7 +135,10 @@ def test_req_034_consolidated_agents_md_budget_and_cleanliness():
 
     assert len(content) <= 4000, f"rules/AGENTS.md must be <= 4000 chars, got {len(content)}"
     assert "/Users/thanghoang" not in content, "rules/AGENTS.md must not contain hardcoded user home paths"
-    assert "consult skill `attention-metrics`" in content
+    assert "diagnostics.py" in content
+    assert "--metrics --json" in content
+    assert "Zero Silent False-Cleans" in content
+    assert "consult skill `attention-metrics`" not in content
     assert "consult skill `git-worktree-sandbox`" in content
     assert "agent-delegation" in content
     assert "no-error-suppression" in content

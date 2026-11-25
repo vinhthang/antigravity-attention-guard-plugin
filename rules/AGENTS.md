@@ -2,33 +2,34 @@
 
 <rule name="agent-delegation">
 <description>
-Enforces mechanical safety guards, pragmatic multi-agent delegation, explicit plan approval, and zero error suppression without ceremony overhead.
+Enforces mechanical safety guards, pragmatic delegation, native Plan-Execute alignment, Gemini 4 effort calibration, and zero error suppression.
 </description>
 
 <constraints>
 - **Pragmatic Execution & Delegation**:
-  - Execute quick fixes, 1–2 file edits, config updates, git operations, and `rtk`-filtered test checks directly in the Primary Agent.
-  - Delegate via `invoke_subagent`, `run_workflow`, or native `swarm` when work spans 3+ disjoint files, parallel workstreams, broad read-only exploration, or noisy multi-step builds—keeping the Primary Agent's context focused on architecture and coordination.
-  - **Subagent Input/Output Shape**: Delegate bounded tasks with large input context and concise summaries (never dump raw ANSI logs or full pytest traces into `send_message`).
-- **Explicit Approval Gate (`/grill-me` & `/plan`)**:
+  - Run quick fixes, 1–2 file edits, config updates, git ops, and `rtk`-filtered tests directly in the Primary Agent.
+  - Delegate via `invoke_subagent`, `run_workflow`, or native `swarm` for 3+ disjoint files, parallel workstreams, broad read-only exploration, or noisy multi-step builds.
+  - **Turn-Cost Math & Subagent I/O**: Batch parallel reads with wide line bounds for `edit_file` (each turn resends full history). Keep `send_message` concise—no raw ANSI logs or full pytest traces.
+- **Native Plan-Execute Alignment (`/grill-me` & `/plan`)**:
   - Clarify material scope ambiguities via `ask_question` (`(Recommended)` first) before planning.
-  - For multi-step features or architectural refactors, author `implementation_plan.md` in Brain Artifacts (linking rather than duplicating `docs/specs/` when present) and wait for explicit human approval ("Proceed") before executing code changes (exempt under `/goal`).
+  - Pause with `implementation_plan.md` for human `"Proceed"` approval **only** on `/plan`, `/grill-me`, `docs/specs/` authoring, material ambiguity, or external/irreversible risk; otherwise embed Red -> Green -> Refactor in `exit_plan_mode(plan=...)` directly (exempt under `/goal`).
 - **Mechanical Safety & Zero Error Suppression (`no-error-suppression`)**:
-  - Never run sweeping destructive commands (`git reset --hard`, `git clean -f`, `git checkout .`, `git restore .`, unleased `git push --force`, catastrophic `rm -rf`) or introduce test-skipping/vacuous markers (`@pytest.mark.skip`, `pytest.skip(`, `it.skip(`, `t.Skip(`, `assert True`).
-  - Fail fast: never swallow exceptions with bare `pass`, empty `catch {}`, `|| true`, or Go `_` error discards.
-  - **Epistemic Honesty**: Never make speculative edits without root-cause evidence, and never silently substitute requested models, tools, or parameters. Engineer-to-engineer tone: direct, concise, factual, zero hype.
+  - Never run destructive commands (`git reset --hard`, `git clean -f`, `git checkout .`, `git restore .`, unleased `git push --force`, catastrophic `rm -rf`) or add skip/vacuous markers (`@pytest.mark.skip`, `pytest.skip(`, `it.skip(`, `t.Skip(`, `assert True`).
+  - Fail fast: never swallow errors with bare `pass`, empty `catch {}`, `|| true`, or Go `_` discards.
+  - **Zero Silent False-Cleans**: Never report `rc=0` or `CLEAN` when a parser swallowed errors, matched zero targets, or fell back to default scores—surface unparsed files, missing prerequisites, and `SKILL.md` vs live `--help` mismatches.
+  - **Epistemic Honesty & Collapsed-UI Disclosure**: No speculative edits without root-cause evidence or silent model/tool substitution. Repeat autonomous assumptions, skipped checks, or constraints in your final reply (intermediate tool commentary collapses in UI). Engineer-to-engineer tone: direct, concise, factual.
 </constraints>
 
 <instructions>
-### 1. Multi-Agent Selection Guide (When Delegating)
-- **Model Selection**: Use `flash_lite` (`TypeName="research"`) for broad read-only searches, `flash` for bounded code/test execution, `pro` for deep algorithmic diagnosis, or `inherit` when full parent reasoning is needed.
-- **1–2 Disjoint Tasks (`invoke_subagent`)**: Spawn concurrent flat `invoke_subagent` calls in one turn with `Workspace="share"` (or `"branch"`) for disjoint file write-sets; serialize overlapping files on `Workspace="inherit"`.
-- **3+ Disjoint Slices or Staged Pipelines (`run_workflow`)**: Use `run_workflow` (`phase`, `parallel`, `pipeline`, `agent(..., workspace="share")`).
-- **Peer Collaboration & Verifier Loops (`swarm` / `/teamwork`)**: Use native `swarm` with `workspace="share"` for parallel authors and `workspace="inherit"` for `@verifier`, merging branches cleanly before `swarm(action="kill")`.
-- **Bounded Escalation**: Cap autonomous fix attempts at 3 escalations before halting and reporting root-cause findings to the user.
+### 1. Gemini 4 Effort & Subagent Model Selection
+- Gemini 4 Carbon (`0.15` unset vs `1.00` High) and Argon (`0.20` vs `1.00`) gain 5x–6.6x reasoning at High effort. Default workers to `inherit` (omit `Model`); pass `Model="flash"` for `browser` and mechanical sweeps, `flash_lite` (`TypeName="research"`) for broad read-only search, or `pro` for deep escalation.
+- **1–2 Disjoint Tasks (`invoke_subagent`)**: Spawn concurrent `invoke_subagent` calls with `Workspace="share"` (or `"branch"`) for disjoint write-sets; serialize overlapping files on `Workspace="inherit"`.
+- **3+ Disjoint Slices (`run_workflow`)**: Use `run_workflow` (`phase`, `parallel`, `pipeline`, `agent(..., workspace="share")`).
+- **Peer Collaboration (`swarm` / `/teamwork`)**: Use native `swarm` (`workspace="share"` for parallel authors, `workspace="inherit"` for `@verifier`), merging branches before `swarm(action="kill")`.
+- **Bounded Escalation**: Cap autonomous fix attempts at 3 escalations before halting with root-cause findings.
 
 ### 2. Skill Routing Triggers
-- When viewing or analyzing Attention Guard metrics and enforcement telemetry, consult skill `attention-metrics`.
+- When viewing or analyzing Attention Guard enforcement telemetry, run `rtk python3 $(ls ~/.gemini/config/plugins/*/scripts/diagnostics.py 2>/dev/null | head -n 1) --metrics --json` directly and inspect `denials_by_tool` root causes whenever `primary_denials > 0`.
 - When managing persistent CLI git worktree sandboxes outside native `Workspace="share"` isolation, consult skill `git-worktree-sandbox`.
 </instructions>
 </rule>

@@ -35,7 +35,7 @@ def test_valid_plugin_surface_attention_guard():
     assert ok is True, f"Surface errors in attention-guard: {errs}"
     assert len(errs) == 0
     assert census["valid"] is True
-    assert "attention-metrics" in census["skills"]
+    assert census["skills"] == ["git-worktree-sandbox"]
     assert census["always_on_chars"] <= census["always_on_max"]
 
 
@@ -380,5 +380,68 @@ def test_extract_frontmatter_yaml_block_scalars():
     assert fm["description"] == "This is a multiline description for testing block scalars."
 
 
+def test_model_decision_rule_zero_always_on_chars(tmp_path):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "domain.md").write_text(
+        "---\n"
+        "trigger: model_decision\n"
+        "description: Domain routing rule.\n"
+        "---\n"
+        "Consult skill `s1`.\n",
+        encoding="utf-8",
+    )
+    skill_dir = tmp_path / "skills" / "s1"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: s1\ndescription: Test skill\n---\n",
+        encoding="utf-8",
+    )
 
+    ok, errs, census = validate_plugin_surface(tmp_path)
+    assert ok is True, f"Expected valid, got: {errs}"
+    assert errs == []
+    assert census["always_on_chars"] == 0
+
+
+def test_model_decision_rule_missing_description_fails(tmp_path):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "domain.md").write_text(
+        "---\ntrigger: model_decision\n---\n# Rule\n",
+        encoding="utf-8",
+    )
+
+    ok, errs, _ = validate_plugin_surface(tmp_path)
+    assert ok is False
+    assert any("description" in e for e in errs)
+
+
+def test_glob_rule_validation_and_zero_always_on(tmp_path):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    rule_file = rules_dir / "py.md"
+    rule_file.write_text("---\ntrigger: glob\n---\n# Rule\n", encoding="utf-8")
+
+    ok_missing, errs_missing, _ = validate_plugin_surface(tmp_path)
+    assert ok_missing is False
+    assert any("globs" in e for e in errs_missing)
+
+    rule_file.write_text("---\ntrigger: glob\nglobs: \"*.py\"\n---\n# Rule\n", encoding="utf-8")
+    ok_valid, errs_valid, census = validate_plugin_surface(tmp_path)
+    assert ok_valid is True, f"Expected valid, got: {errs_valid}"
+    assert census["always_on_chars"] == 0
+
+
+def test_invalid_rule_trigger_value_fails(tmp_path):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "bad.md").write_text(
+        "---\ntrigger: alwaysOn\ndescription: Bad camelCase.\n---\n# Rule\n",
+        encoding="utf-8",
+    )
+
+    ok, errs, _ = validate_plugin_surface(tmp_path)
+    assert ok is False
+    assert any("Invalid rule trigger" in e for e in errs)
 

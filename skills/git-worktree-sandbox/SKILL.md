@@ -22,24 +22,24 @@ Use this skill to provision, manage, and tear down isolated working trees for su
 
 ### Create an Isolated Sandbox
 ```bash
-python3 $(ls ~/.gemini/config/plugins/*/skills/git-worktree-sandbox/scripts/worktree_manager.py 2>/dev/null | head -n 1) create <task_id> [--repo <path>]
+rtk python3 $(ls ~/.gemini/config/plugins/*/skills/git-worktree-sandbox/scripts/worktree_manager.py 2>/dev/null | head -n 1) create <task_id> [--repo <path>]
 ```
-- Provisions `.worktrees/<task_id>` on a temporary branch `sandbox/<task_id>`.
+- Provisions `.worktrees/<task-id>` on a temporary branch `sandbox/<task-id>` (`--repo` is accepted either before or after the subcommand).
 - Automatically ensures `.worktrees/` is recorded in `.gitignore`.
 
 ### List Active Sandboxes
 ```bash
-python3 $(ls ~/.gemini/config/plugins/*/skills/git-worktree-sandbox/scripts/worktree_manager.py 2>/dev/null | head -n 1) list
+rtk python3 $(ls ~/.gemini/config/plugins/*/skills/git-worktree-sandbox/scripts/worktree_manager.py 2>/dev/null | head -n 1) list [--repo <path>]
 ```
 
 ### Safely Discard a Sandbox (On Failure)
 ```bash
-python3 $(ls ~/.gemini/config/plugins/*/skills/git-worktree-sandbox/scripts/worktree_manager.py 2>/dev/null | head -n 1) cleanup <task_id> --delete-branch
+rtk python3 $(ls ~/.gemini/config/plugins/*/skills/git-worktree-sandbox/scripts/worktree_manager.py 2>/dev/null | head -n 1) cleanup <task_id> --delete-branch [--repo <path>]
 ```
 
 ### Fast-Forward Merge (On Success)
 ```bash
-python3 $(ls ~/.gemini/config/plugins/*/skills/git-worktree-sandbox/scripts/worktree_manager.py 2>/dev/null | head -n 1) merge <task_id> --target <branch>
+rtk python3 $(ls ~/.gemini/config/plugins/*/skills/git-worktree-sandbox/scripts/worktree_manager.py 2>/dev/null | head -n 1) merge <task_id> --target <branch> [--repo <path>]
 ```
 
 ---
@@ -58,3 +58,5 @@ Primary Agent
     └── 4. On Green Pass: Merge or Cherry-Pick changes
            On Failure: Cleanup worktree with zero main-tree side effects
 ```
+
+- **Feedback Loop Rule**: Run `worktree_manager.py list [--repo <path>]` after `cleanup` or `merge` to confirm no orphaned worktree or `sandbox/<task-id>` branch remains.
