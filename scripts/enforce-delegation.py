@@ -15,6 +15,7 @@ from common import (
     scan_transcript_header,
     validate_no_raw_log_dump,
 )
+from kubectl_guard import check_kubectl_mutation
 
 MUTATION_TOOLS = {
     "write_to_file",
@@ -301,7 +302,7 @@ def check_destructive_command(cmd_str: str) -> Optional[str]:
                     if norm == "":
                         if tgt == "" and any(q in s for q in ('""', "''")):
                             return f"Attention Guard: Sweeping destructive command '{cmd_str}' is forbidden (catastrophic rm targeting '{tgt}')."
-    return None
+    return check_kubectl_mutation(cmd_str)
 
 
 def record_subagent_file_edit(conv_id: str, target_file: str = "", ledger=None):
