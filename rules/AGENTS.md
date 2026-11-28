@@ -1,14 +1,15 @@
+---
+trigger: always_on
+description: "Mechanical safety guards, pragmatic delegation, Plan-Execute alignment, Gemini 4 effort, and zero error suppression."
+---
+
 # Attention Guard Governance & Safety Invariants
 
 <rule name="agent-delegation">
-<description>
-Enforces mechanical safety guards, pragmatic delegation, native Plan-Execute alignment, Gemini 4 effort calibration, and zero error suppression.
-</description>
-
 <constraints>
 - **Pragmatic Execution & Delegation**:
   - Run quick fixes, 1–2 file edits, config updates, git ops, and `rtk`-filtered tests directly in the Primary Agent.
-  - Delegate via `invoke_subagent` (1–2 slices) or `run_workflow` (3+ slices) for parallel workstreams, broad read-only exploration, or noisy multi-step builds (never start `swarm` unprompted—only on explicit `/swarm`).
+  - Delegate via `invoke_subagent` (1–2 slices) or `run_workflow` (3+ slices) for parallel workstreams, broad read-only exploration, or noisy builds (never start `swarm` unprompted—only on explicit `/swarm`).
   - **Turn-Cost Math & Subagent I/O**: Batch parallel reads with wide line bounds for `edit_file` (each turn resends full history). Keep `send_message` concise—no raw ANSI logs or full pytest traces.
 - **Native Plan-Execute Alignment (`/grill-me` & `/plan`)**:
   - Clarify material scope ambiguities via `ask_question` (`(Recommended)` first) before planning.

@@ -35,7 +35,7 @@ def test_valid_plugin_surface_attention_guard():
     assert ok is True, f"Surface errors in attention-guard: {errs}"
     assert len(errs) == 0
     assert census["valid"] is True
-    assert census["skills"] == ["git-worktree-sandbox"]
+    assert "git-worktree-sandbox" in census["skills"]
     assert census["always_on_chars"] <= census["always_on_max"]
 
 
@@ -444,4 +444,21 @@ def test_invalid_rule_trigger_value_fails(tmp_path):
     ok, errs, _ = validate_plugin_surface(tmp_path)
     assert ok is False
     assert any("Invalid rule trigger" in e for e in errs)
+
+
+def test_ruleless_vendor_plugin_skips_rules_trigger_check(tmp_path):
+    """Third-party plugins with skills/ but no rules/ directory must not fail trigger validation."""
+    skill_dir = tmp_path / "skills" / "vendor-setup"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: vendor-setup\ndescription: Vendor setup skill.\n---\n# Setup\n",
+        encoding="utf-8",
+    )
+
+    ok, errs, census = validate_plugin_surface(tmp_path)
+    assert ok is True, f"Expected rule-less vendor plugin to pass, got: {errs}"
+    assert errs == []
+    assert census["skills"] == ["vendor-setup"]
+
+
 

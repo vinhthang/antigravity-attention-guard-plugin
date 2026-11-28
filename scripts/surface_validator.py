@@ -410,6 +410,7 @@ def validate_plugin_surface(
 
     # 2. Skills frontmatter & trigger checks
     rules_text = all_rules_text(tree)
+    has_rules_dir = any(p.startswith("rules/") and p.endswith(".md") for p in tree)
     skills = skill_names(surface, tree)
     for name in skills:
         skill_path = f"{surface.skill_dir}/{name}/SKILL.md"
@@ -421,7 +422,7 @@ def validate_plugin_surface(
         fm_name = fm.get("name")
         if fm_name and fm_name != name:
             errs.append(f"Skill '{name}' has mismatched name '{fm_name}' in frontmatter")
-        if not re.search(rf"(?<![A-Za-z0-9_-]){re.escape(name)}(?![A-Za-z0-9_-])", rules_text):
+        if has_rules_dir and not re.search(rf"(?<![A-Za-z0-9_-]){re.escape(name)}(?![A-Za-z0-9_-])", rules_text):
             errs.append(f"Skill '{name}' is not triggered in any rules/*.md")
 
     # 3. Python scripts compilation

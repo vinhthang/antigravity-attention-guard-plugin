@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import time
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -27,6 +28,8 @@ from surface_validator import (
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 _MD_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)#?\s]+)\)")
+_FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 _GLOBAL_SKILL_REF_RE = re.compile(r"~/.gemini/config/skills/([A-Za-z0-9._/-]+)")
 _CLI_ERROR_RE = re.compile(
     r"((?:unrecognized arguments|unknown flag|no such option|command not found|can't open file):?\s*[^\n\"\\`]+)",
@@ -117,10 +120,11 @@ def _check_skill_links(skill_file: Path, config_root: Path) -> list[str]:
         errs.append(f"Skill {skill_file}: missing frontmatter 'description'")
 
     skill_dir = skill_file.parent
-    for link in _MD_LINK_RE.findall(text):
+    prose = _INLINE_CODE_RE.sub("", _FENCED_CODE_RE.sub("", text))
+    for link in _MD_LINK_RE.findall(prose):
         if link.startswith(("http://", "https://", "mailto:", "#", "<", "customization://", "sidecar://")):
             continue
-        if "<" in link or ">" in link:
+        if "<" in link or ">" in link or "..." in link:
             continue
         cand = (skill_dir / link).resolve()
         if not cand.exists():
@@ -153,10 +157,23 @@ def _audit_skills_and_plugins(config_root: Path) -> tuple[dict[str, Any], list[s
         for pdir in sorted(plugins_dir.iterdir()):
             if not pdir.is_dir():
                 continue
-            for sf in sorted(pdir.glob("skills/*/SKILL.md")):
-                known_skills[sf.parent.name] = sf
-                errors.extend(_check_skill_links(sf, config_root))
-            if (pdir / "plugin.json").is_file():
+            skill_roots: list[Path] = [pdir / "skills"]
+            manifest_file = pdir / "plugin.json"
+            if manifest_file.is_file():
+                try:
+                    manifest = json.loads(manifest_file.read_text(encoding="utf-8", errors="replace"))
+                except (OSError, json.JSONDecodeError) as exc:
+                    errors.append(f"Plugin {pdir.name}: unreadable plugin.json: {exc}")
+                    manifest = {}
+                raw_roots = manifest.get("skills") if isinstance(manifest, dict) else None
+                if isinstance(raw_roots, list) and raw_roots:
+                    skill_roots = [(pdir / str(r)).resolve() for r in raw_roots]
+            for sroot in skill_roots:
+                if sroot.is_dir():
+                    for sf in sorted(sroot.glob("*/SKILL.md")):
+                        known_skills[sf.parent.name] = sf
+                        errors.extend(_check_skill_links(sf, config_root))
+            if manifest_file.is_file():
                 plugin_count += 1
                 ok, p_errs, _ = validate_plugin_surface(pdir)
                 if not ok:
@@ -188,26 +205,40 @@ def _scan_transcripts(
             continue
         scanned_files += 1
         try:
-            with open(tpath, "r", encoding="utf-8", errors="replace") as fh:
-                for raw in fh:
-                    if "/SKILL.md" in raw:
-                        try:
-                            entry = json.loads(raw)
-                        except json.JSONDecodeError:
-                            entry = None
-                        if isinstance(entry, dict):
-                            for tc in entry.get("tool_calls", []) or []:
-                                args = tc.get("args") or {}
-                                pval = str(
-                                    args.get("Path") or args.get("path") or args.get("file_path") or ""
-                                )
-                                for sname in skill_names:
-                                    if f"/{sname}/SKILL.md" in pval:
-                                        usage[sname] += 1
-                    for err_m in _CLI_ERROR_RE.finditer(raw):
-                        norm = " ".join(err_m.group(1).strip().split())
-                        if norm:
-                            cli_errors[norm] += 1
+            full_text = tpath.read_text(encoding="utf-8", errors="replace")
+            is_audit_transcript = (
+                "weekly_skill_rule_audit.py" in full_text
+                and "Weekly Skills & Rules Health Audit" in full_text
+            )
+            for raw in full_text.splitlines():
+                try:
+                    entry = json.loads(raw)
+                except json.JSONDecodeError:
+                    entry = None
+                if isinstance(entry, dict) and entry.get("created_at"):
+                    try:
+                        ts = datetime.fromisoformat(str(entry["created_at"]).replace("Z", "+00:00")).timestamp()
+                        if ts < cutoff:
+                            continue
+                    except ValueError:
+                        ts = cutoff
+                if "/SKILL.md" in raw and isinstance(entry, dict):
+                    for tc in entry.get("tool_calls", []) or []:
+                        args = tc.get("args") or {}
+                        pval = str(
+                            args.get("Path") or args.get("path") or args.get("file_path") or ""
+                        )
+                        for sname in skill_names:
+                            if f"/{sname}/SKILL.md" in pval:
+                                usage[sname] += 1
+                if is_audit_transcript or "repeated_cli_errors" in raw or "_CLI_ERROR_RE" in raw:
+                    continue
+                if isinstance(entry, dict) and entry.get("type") == "PLANNER_RESPONSE":
+                    continue
+                for err_m in _CLI_ERROR_RE.finditer(raw):
+                    norm = " ".join(err_m.group(1).strip().split())
+                    if norm:
+                        cli_errors[norm] += 1
         except OSError:
             continue
 
@@ -239,7 +270,7 @@ def _query_denials(db_path: Path, days: int) -> dict[str, Any]:
                     if isinstance(payload, dict) and payload.get("tool"):
                         tool = str(payload["tool"])
                 except json.JSONDecodeError:
-                    pass
+                    tool = "unknown"
                 by_tool[tool] += 1
     except sqlite3.Error:
         return {"total": 0, "by_tool": {}}
@@ -256,7 +287,8 @@ def run_weekly_audit(
 ) -> dict[str, Any]:
     cfg = (config_root or Path("~/.gemini/config").expanduser()).resolve()
     brain = (brain_root or Path("~/.gemini/antigravity/brain").expanduser()).resolve()
-    db = (db_path or (cfg / "plugins" / "attention-guard" / "attention_guard.db")).resolve()
+    app_data = Path(os.environ.get("AGY_APP_DATA_DIR") or "~/.gemini/antigravity").expanduser()
+    db = (db_path or (app_data / "attention_guard.db")).resolve()
 
     rules_info, rule_errors = _audit_rules(cfg, always_on_budget=always_on_budget)
     skills_info, skill_errors, known_skills = _audit_skills_and_plugins(cfg)
